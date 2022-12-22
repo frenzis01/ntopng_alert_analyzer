@@ -103,7 +103,15 @@ except ValueError as e:
 df = pd.DataFrame(raw_alerts)
 # print(df.dtypes)
 # TODO make the grouping parametric
-df.groupby(["alert_id","srv_ip"]).apply(lambda x : print(x.head(2))).size().sort_values(ascending=False)
+
+def statsFromSeries(s):
+    d = {}
+    d["srv_port_entropy"] = s["srv_port"].max()
+    d["cli_port_entropy"] = s["cli_port"].max()
+    d["cli_ip_entropy"] = s["cli_ip"].max()
+    d["cli_ip_blk"] = s["cli_blacklisted"].sum()
+    return pd.Series(d, index=["srv_port_entropy","cli_port_entropy","cli_ip_entropy","cli_ip_blk"])
+print(df.groupby(["alert_id","srv_ip"]).apply(statsFromSeries)) #.size().sort_values(ascending=False)
 
 
 
