@@ -142,7 +142,7 @@ try:
 
     my_historical = Historical(my_ntopng)
     last15minutes = (datetime.datetime.now() -
-                     datetime.timedelta(minutes=45)).strftime('%s')
+                     datetime.timedelta(minutes=15)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
         '%s'), "*", "severity = 5", 10000, "", "")
     # TODO change maxhits
@@ -171,6 +171,15 @@ df[["is_srv_victim", "srv_blacklisted", "cli_blacklisted", "is_srv_attacker", "i
 df = df.sort_values(by=["tstamp"])
 
 
+flag = False
+
+
+def isUAmissing(x):
+    if x.find("Empty or missing User-Agent") != -1:
+        return 1
+    return 0
+
+
 def statsFromSeries(s):
     d = {}
     d["srv_port_entropy"] = s["srv_port"].max()
@@ -181,44 +190,24 @@ def statsFromSeries(s):
     d["tdiff_avg"] = s["tstamp"].diff().mean()
     d["tdiff_CV"] = s["tstamp"].std()/d["tdiff_avg"]
     d["score_avg"] = s["score"].mean()
+    d["NoUA"] = s["json"].apply(foo).sum()
     d["size"] = len(s)
     # d["noUA_perc"] = s["json"]
-    return pd.Series(d, index=["srv_port_entropy", "cli_port_entropy", "cli_ip_entropy", "cli_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg","size"])
+    return pd.Series(d, index=["srv_port_entropy", "cli_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
 
-pd.set_option("display.precision",3) #TODO change this?
+
+pd.set_option("display.precision", 3)  # TODO change this?
 
 # TODO make the grouping parametric
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
-# 
+#
 MIN_RELEVANT_GRP_SIZE = 3
-flag = False
-x = [2,3]
-
-def foo(x):
-    NoUA_count = 0
-    for i in x.values:
-        # NoUA_count += 1 if str(i).find("Empty or missing User-Agent") != -1 else 0
-        if str(i).find("Empty or missing User-Agent") != -1:
-            NoUA_count += 1
-    global flag
-    if not flag:
-        print("----------------")
-        print(str(x.values[0]))
-        # print(vals.alert_gener)
-        # print(x.values)
-        # valsarr = json.loads(x.array)
-        # print(x.to_list())
-        # print(dir(vals))
-        # print(x.to_json(indent=2))
-    flag = True
-    return NoUA_count
 by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip", "vlan_id"])
-print(by_srv_ip.apply(statsFromSeries))
-with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
-    print(by_srv_ip["json"].apply(lambda x: foo(x)))
-
+print(by_srv_ip.apply(statsFromSeries).sort_values(by="NoUA"))
+# with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+#     print(by_srv_ip["json"].apply(lambda x: foo(x)))
 
 
 # os._exit(0)
