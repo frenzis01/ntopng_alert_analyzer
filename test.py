@@ -187,13 +187,13 @@ def statsFromSeries(s):
     d["cli_ip_entropy"] = s["cli_ip"].max()
     d["cli_ip_blk"] = s["cli_blacklisted"].sum()
     d["srv_ip_blk"] = s["srv_blacklisted"].max()
-    d["tdiff_avg"] = s["tstamp"].diff().mean()
+    d["tdiff_avg"] = s["tstamp"].diff().mean().round("s")
     d["tdiff_CV"] = s["tstamp"].std()/d["tdiff_avg"]
     d["score_avg"] = s["score"].mean()
-    d["NoUA"] = s["json"].apply(foo).sum()
+    d["NoUA"] = s["json"].apply(isUAmissing).sum()
     d["size"] = len(s)
     # d["noUA_perc"] = s["json"]
-    return pd.Series(d, index=["srv_port_entropy", "cli_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
+    return pd.Series(d, index=["srv_port_entropy","cli_ip_entropy","cli_port_entropy", "cli_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
 
 
 pd.set_option("display.precision", 3)  # TODO change this?
