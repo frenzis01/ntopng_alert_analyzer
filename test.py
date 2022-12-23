@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# ntopng related imports 
+# ntopng related imports
 import os
 import sys
 import getopt
@@ -27,7 +27,7 @@ ntopng_url = myenv.myurl
 iface_id = 12  # all
 auth_token = None
 enable_debug = False
-host_ip = "192.168.1.1" # useful only for -H option
+host_ip = "192.168.1.1"  # useful only for -H option
 
 ##########
 
@@ -99,10 +99,75 @@ except ValueError as e:
     print(e)
     os._exit(-1)
 
+dtypes = {
+    "srv_port":             "int",
+    "tstamp_end":           "datetime64[ns]",
+    "probe_ip":             "string",
+    "severity":             "int",
+    "info":                 "object",
+    "cli2srv_bytes":        "int",
+    "l7_cat":               "object",
+    "is_srv_victim":        "bool",
+    "cli_ip":               "string",
+    "vlan_id":              "int",
+    "cli_host_pool_id":     "int",
+    "srv_host_pool_id":     "int",
+    "rowid":                "int",
+    "tstamp":               "datetime64[ns]",
+    "community_id":         "int",
+    "input_snmp":           "object",
+    "l7_master_proto":      "object",
+    "srv_network":          "object",
+    "flow_risk_bitmap":     "object",
+    "user_label":           "object",
+    "proto":                "object",
+    "ip_version":           "int",
+    "srv2cli_pkts":         "int",
+    "srv_name":             "string",
+    "alerts_map":           "object",
+    "srv_location":         "object",
+    "json":                 "object",
+    "cli_location":         "object",
+    "srv_blacklisted":      "bool",
+    "interface_id":         "int",
+    "cli_blacklisted":      "bool",
+    "is_srv_attacker":      "bool",
+    "is_cli_victim":        "bool",
+    "srv_ip":               "string",
+    "is_cli_attacker":      "bool",
+    "cli2srv_pkts":         "int",
+    "output_snmp":          "object",
+    "cli_network":          "object",
+    "score":                "int",
+    "cli_name":             "string",
+    "srv2cli_bytes":        "int",
+    "cli_port":             "int",
+    "alert_id":             "int",
+    "l7_proto":             "int",
+    "cli_country":          "object",
+    "srv_country":          "object",
+    "user_label_tstamp":    "datetime64[ns]",
+    "first_seen":           "object",
+    "alert_status":         "object"
+}
 # print(json.dumps(raw_alerts, indent=2))
 df = pd.DataFrame(raw_alerts)
 # print(df.dtypes)
-# TODO make the grouping parametric
+
+# convert dtypes
+df[["tstamp", "tstamp_end", "user_label_tstamp"]] = df[[
+    "tstamp", "tstamp_end", "user_label_tstamp"]].apply(pd.to_datetime)
+df[["probe_ip", "cli_ip", "srv_name", "srv_ip", "cli_name"]] = df[[
+    "probe_ip", "cli_ip", "srv_name", "srv_ip", "cli_name"]].astype("string")
+
+df[["srv_port", "severity", "cli2srv_bytes", "vlan_id", "cli_host_pool_id", "srv_host_pool_id", "rowid", "community_id",
+    "ip_version", "srv2cli_pkts", "interface_id", "cli2srv_pkts", "score", "srv2cli_bytes", "cli_port", "alert_id", "l7_proto"]] = df[[
+        "srv_port", "severity", "cli2srv_bytes", "vlan_id", "cli_host_pool_id", "srv_host_pool_id", "rowid", "community_id", "ip_version", "srv2cli_pkts", "interface_id", "cli2srv_pkts", "score", "srv2cli_bytes", "cli_port", "alert_id", "l7_proto"]].apply(pd.to_numeric)
+
+df[["is_srv_victim","srv_blacklisted","cli_blacklisted","is_srv_attacker","is_cli_victim","is_cli_attacker"]] = df[["is_srv_victim","srv_blacklisted","cli_blacklisted","is_srv_attacker","is_cli_victim","is_cli_attacker"]].astype("bool")
+
+# sort on tstamp
+df = df.sort_values(by=["tstamp"])
 
 def statsFromSeries(s):
     d = {}
@@ -110,9 +175,16 @@ def statsFromSeries(s):
     d["cli_port_entropy"] = s["cli_port"].max()
     d["cli_ip_entropy"] = s["cli_ip"].max()
     d["cli_ip_blk"] = s["cli_blacklisted"].sum()
-    return pd.Series(d, index=["srv_port_entropy","cli_port_entropy","cli_ip_entropy","cli_ip_blk"])
-print(df.groupby(["alert_id","srv_ip"]).apply(statsFromSeries)) #.size().sort_values(ascending=False)
+    d["srv_ip_blk"] = s["srv_blacklisted"].max()
+    d["tdiff_avg"] = s["tstamp"].diff().mean()
+    d["tdiff_CV"] = s["tstamp"].std()#/d["tdiff_avg"]
+    d["size"] = len(s)
+    return pd.Series(d, index=["srv_port_entropy", "cli_port_entropy", "cli_ip_entropy", "cli_ip_blk","tdiff_avg","tdiff_CV","size"])
 
+# TODO make the grouping parametric
+# print(df.groupby(["alert_id","srv_ip","vlan_id"]).filter(lambda g: len(g) > 3).apply(statsFromSeries,1))
+print(df.groupby(["alert_id","srv_ip","vlan_id"]).filter(lambda g: len(g) > 3))
+# print(df.apply(statsFromSeries)) #.size().sort_values(ascending=False)
 
 
 # os._exit(0)
