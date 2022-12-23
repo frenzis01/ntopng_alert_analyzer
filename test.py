@@ -93,7 +93,7 @@ try:
     last15minutes = (datetime.datetime.now() -
                      datetime.timedelta(minutes=5)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
-        '%s'), "*", "severity = 5", 10000, "", "")
+        '%s'), "*", "severity = 5", 20, "", "")
     # TODO change maxhits
 except ValueError as e:
     print(e)
@@ -177,14 +177,30 @@ def statsFromSeries(s):
     d["cli_ip_blk"] = s["cli_blacklisted"].sum()
     d["srv_ip_blk"] = s["srv_blacklisted"].max()
     d["tdiff_avg"] = s["tstamp"].diff().mean()
-    d["tdiff_CV"] = s["tstamp"].std()#/d["tdiff_avg"]
+    d["tdiff_CV"] = s["tstamp"].std()/d["tdiff_avg"]
     d["size"] = len(s)
     return pd.Series(d, index=["srv_port_entropy", "cli_port_entropy", "cli_ip_entropy", "cli_ip_blk","tdiff_avg","tdiff_CV","size"])
 
+# print(type(df))
+# print(df.index[:5])
+# print(df[["alert_id","srv_ip","vlan_id"]])
 # TODO make the grouping parametric
-# print(df.groupby(["alert_id","srv_ip","vlan_id"]).filter(lambda g: len(g) > 3).apply(statsFromSeries,1))
-print(df.groupby(["alert_id","srv_ip","vlan_id"]).filter(lambda g: len(g) > 3))
+groups = df.groupby(["alert_id","srv_ip","vlan_id"])
+print(groups.filter(lambda g: len(g) > 2))
+# print(groups.filter(lambda g: len(g) > 2))
+print(groups.apply(statsFromSeries))
+
+print(groups.filter(lambda g: len(g) > 2).groupby(["alert_id","srv_ip","vlan_id"]).apply(statsFromSeries))
+
+
+# print(type(dfg))
+# print(type(groups))
+# print(dfg.index[:5])
+# print(groups.index[:5])
+# print(dfg)
+# print(groups)
 # print(df.apply(statsFromSeries)) #.size().sort_values(ascending=False)
+
 
 
 # os._exit(0)
