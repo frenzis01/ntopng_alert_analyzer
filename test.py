@@ -87,21 +87,9 @@ except ValueError as e:
     print(e)
     os._exit(-1)
 
-try:
-
-    my_historical = Historical(my_ntopng)
-    last15minutes = (datetime.datetime.now() -
-                     datetime.timedelta(minutes=5)).strftime('%s')
-    raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
-        '%s'), "*", "severity = 5", 20, "", "")
-    # TODO change maxhits
-except ValueError as e:
-    print(e)
-    os._exit(-1)
-
 dtypes = {
     "srv_port":             "int",
-    "tstamp_end":           "datetime64[ns]",
+    "tstamp_end":           "datetime64[s]",
     "probe_ip":             "string",
     "severity":             "int",
     "info":                 "object",
@@ -150,6 +138,18 @@ dtypes = {
     "first_seen":           "object",
     "alert_status":         "object"
 }
+try:
+
+    my_historical = Historical(my_ntopng)
+    last15minutes = (datetime.datetime.now() -
+                     datetime.timedelta(minutes=45)).strftime('%s')
+    raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
+        '%s'), "*", "severity = 5", 10000, "", "")
+    # TODO change maxhits
+except ValueError as e:
+    print(e)
+    os._exit(-1)
+
 # print(json.dumps(raw_alerts, indent=2))
 df = pd.DataFrame(raw_alerts)
 # print(df.dtypes)
@@ -180,16 +180,45 @@ def statsFromSeries(s):
     d["srv_ip_blk"] = s["srv_blacklisted"].max()
     d["tdiff_avg"] = s["tstamp"].diff().mean()
     d["tdiff_CV"] = s["tstamp"].std()/d["tdiff_avg"]
+    d["score_avg"] = s["score"].mean()
     d["size"] = len(s)
-    return pd.Series(d, index=["srv_port_entropy", "cli_port_entropy", "cli_ip_entropy", "cli_ip_blk", "tdiff_avg", "tdiff_CV", "size"])
+    # d["noUA_perc"] = s["json"]
+    return pd.Series(d, index=["srv_port_entropy", "cli_port_entropy", "cli_ip_entropy", "cli_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg","size"])
 
+pd.set_option("display.precision",3) #TODO change this?
 
 # TODO make the grouping parametric
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
+# 
+MIN_RELEVANT_GRP_SIZE = 3
+flag = False
+x = [2,3]
+
+def foo(x):
+    NoUA_count = 0
+    for i in x.values:
+        # NoUA_count += 1 if str(i).find("Empty or missing User-Agent") != -1 else 0
+        if str(i).find("Empty or missing User-Agent") != -1:
+            NoUA_count += 1
+    global flag
+    if not flag:
+        print("----------------")
+        print(str(x.values[0]))
+        # print(vals.alert_gener)
+        # print(x.values)
+        # valsarr = json.loads(x.array)
+        # print(x.to_list())
+        # print(dir(vals))
+        # print(x.to_json(indent=2))
+    flag = True
+    return NoUA_count
 by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
-    lambda g: len(g) > 2).groupby(["alert_id", "srv_ip", "vlan_id"])
+    lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip", "vlan_id"])
 print(by_srv_ip.apply(statsFromSeries))
+with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
+    print(by_srv_ip["json"].apply(lambda x: foo(x)))
+
 
 
 # os._exit(0)
