@@ -5,7 +5,9 @@ import os
 import sys
 import getopt
 import time
-
+import ipaddress
+import struct
+import socket
 
 from ntopng.ntopng import Ntopng
 from ntopng.interface import Interface
@@ -181,19 +183,24 @@ def isUAmissing(x):
 
 
 def statsFromSeries(s):
+    s_size = len(s)
     d = {}
-    d["srv_port_entropy"] = s["srv_port"].max()
-    d["cli_port_entropy"] = s["cli_port"].max()
-    d["cli_ip_entropy"] = s["cli_ip"].max()
+    d["srv_port_CV"] = s["srv_port"].std()/s_size
+    d["cli_port_CV"] = s["cli_port"].std()/s_size
+    d["cli_ip_CV"] = s["cli_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0]).std()/s_size
     d["cli_ip_blk"] = s["cli_blacklisted"].sum()
     d["srv_ip_blk"] = s["srv_blacklisted"].max()
-    d["tdiff_avg"] = s["tstamp"].diff().mean().round("s")
-    d["tdiff_CV"] = s["tstamp"].std()/d["tdiff_avg"]
+    tdiff_avg_unrounded = s["tstamp"].diff().mean()
+    d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
+    if d["tdiff_avg"] != 0: 
+        d["tdiff_CV"] = s["tstamp"].std()/tdiff_avg_unrounded    
+    else:
+        -1
     d["score_avg"] = s["score"].mean()
     d["NoUA"] = s["json"].apply(isUAmissing).sum()
-    d["size"] = len(s)
+    d["size"] = s_size
     # d["noUA_perc"] = s["json"]
-    return pd.Series(d, index=["srv_port_entropy","cli_ip_entropy","cli_port_entropy", "cli_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
+    return pd.Series(d, index=["srv_port_CV","cli_ip_CV","cli_port_CV", "cli_ip_blk", "srv_ip_blk","tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
 
 
 pd.set_option("display.precision", 3)  # TODO change this?
@@ -205,7 +212,7 @@ pd.set_option("display.precision", 3)  # TODO change this?
 MIN_RELEVANT_GRP_SIZE = 3
 by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip", "vlan_id"])
-print(by_srv_ip.apply(statsFromSeries).sort_values(by="NoUA"))
+print(by_srv_ip.apply(statsFromSeries))
 # with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
 #     print(by_srv_ip["json"].apply(lambda x: foo(x)))
 
