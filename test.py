@@ -164,10 +164,12 @@ df[["srv_port", "severity", "cli2srv_bytes", "vlan_id", "cli_host_pool_id", "srv
     "ip_version", "srv2cli_pkts", "interface_id", "cli2srv_pkts", "score", "srv2cli_bytes", "cli_port", "alert_id", "l7_proto"]] = df[[
         "srv_port", "severity", "cli2srv_bytes", "vlan_id", "cli_host_pool_id", "srv_host_pool_id", "rowid", "community_id", "ip_version", "srv2cli_pkts", "interface_id", "cli2srv_pkts", "score", "srv2cli_bytes", "cli_port", "alert_id", "l7_proto"]].apply(pd.to_numeric)
 
-df[["is_srv_victim","srv_blacklisted","cli_blacklisted","is_srv_attacker","is_cli_victim","is_cli_attacker"]] = df[["is_srv_victim","srv_blacklisted","cli_blacklisted","is_srv_attacker","is_cli_victim","is_cli_attacker"]].astype("bool")
+df[["is_srv_victim", "srv_blacklisted", "cli_blacklisted", "is_srv_attacker", "is_cli_victim", "is_cli_attacker"]] = df[[
+    "is_srv_victim", "srv_blacklisted", "cli_blacklisted", "is_srv_attacker", "is_cli_victim", "is_cli_attacker"]].astype("bool")
 
 # sort on tstamp
 df = df.sort_values(by=["tstamp"])
+
 
 def statsFromSeries(s):
     d = {}
@@ -179,28 +181,15 @@ def statsFromSeries(s):
     d["tdiff_avg"] = s["tstamp"].diff().mean()
     d["tdiff_CV"] = s["tstamp"].std()/d["tdiff_avg"]
     d["size"] = len(s)
-    return pd.Series(d, index=["srv_port_entropy", "cli_port_entropy", "cli_ip_entropy", "cli_ip_blk","tdiff_avg","tdiff_CV","size"])
+    return pd.Series(d, index=["srv_port_entropy", "cli_port_entropy", "cli_ip_entropy", "cli_ip_blk", "tdiff_avg", "tdiff_CV", "size"])
 
-# print(type(df))
-# print(df.index[:5])
-# print(df[["alert_id","srv_ip","vlan_id"]])
+
 # TODO make the grouping parametric
-groups = df.groupby(["alert_id","srv_ip","vlan_id"])
-print(groups.filter(lambda g: len(g) > 2))
-# print(groups.filter(lambda g: len(g) > 2))
-print(groups.apply(statsFromSeries))
-
-print(groups.filter(lambda g: len(g) > 2).groupby(["alert_id","srv_ip","vlan_id"]).apply(statsFromSeries))
-
-
-# print(type(dfg))
-# print(type(groups))
-# print(dfg.index[:5])
-# print(groups.index[:5])
-# print(dfg)
-# print(groups)
-# print(df.apply(statsFromSeries)) #.size().sort_values(ascending=False)
-
+# the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
+# btw, this is odd, there should be a less "dumb" way of keeping the data grouped
+by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
+    lambda g: len(g) > 2).groupby(["alert_id", "srv_ip", "vlan_id"])
+print(by_srv_ip.apply(statsFromSeries))
 
 
 # os._exit(0)
