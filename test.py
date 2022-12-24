@@ -24,6 +24,9 @@ import myenv
 from IPython.display import display
 import math
 from scipy.stats import entropy
+from collections import Counter
+from math import log2
+
 
 # Defaults
 username = myenv.myusr
@@ -121,9 +124,9 @@ dtypes = {
     "srv_location":         "object",
     "json":                 "object",
     "cli_location":         "object",
-    "srv_blacklisted":      "bool",
+    "srv_blacklisted":      "int",
     "interface_id":         "int",
-    "cli_blacklisted":      "bool",
+    "cli_blacklisted":      "int",
     "is_srv_attacker":      "bool",
     "is_cli_victim":        "bool",
     "srv_ip":               "string",
@@ -169,8 +172,9 @@ df[["srv_port", "severity", "cli2srv_bytes", "vlan_id", "cli_host_pool_id", "srv
     "ip_version", "srv2cli_pkts", "interface_id", "cli2srv_pkts", "score", "srv2cli_bytes", "cli_port", "alert_id", "l7_proto"]] = df[[
         "srv_port", "severity", "cli2srv_bytes", "vlan_id", "cli_host_pool_id", "srv_host_pool_id", "rowid", "community_id", "ip_version", "srv2cli_pkts", "interface_id", "cli2srv_pkts", "score", "srv2cli_bytes", "cli_port", "alert_id", "l7_proto"]].apply(pd.to_numeric)
 
+# TODO astype(bool) evaluates 0 to True
 df[["is_srv_victim", "srv_blacklisted", "cli_blacklisted", "is_srv_attacker", "is_cli_victim", "is_cli_attacker"]] = df[[
-    "is_srv_victim", "srv_blacklisted", "cli_blacklisted", "is_srv_attacker", "is_cli_victim", "is_cli_attacker"]].astype("bool")
+    "is_srv_victim", "srv_blacklisted", "cli_blacklisted", "is_srv_attacker", "is_cli_victim", "is_cli_attacker"]].astype("int")
 
 # sort on tstamp
 df = df.sort_values(by=["tstamp"])
@@ -179,12 +183,14 @@ df = df.sort_values(by=["tstamp"])
 flag = False
 
 
+
+
 def isUAmissing(x):
     y = json.loads(x)
     try:
         o = y["alert_generation"]["flow_risk_info"]
         o = json.loads(o)
-        o = o["11"] # useless assignment, needed to trigger KeyError if "11" missing
+        o = o["11"]  # useless assignment, needed to trigger KeyError if "11" missing
         return 1
     except KeyError:
         return 0
@@ -194,45 +200,74 @@ def isUAmissing(x):
     return 0
 
 
-def foo(x):
+def getAlertName(x):
     o = json.loads(x)
     try:
         return o["alert_generation"]["script_key"]
     except KeyError:
         return "no_name"
 
-def statsFromSeries(s):
+def shannon_entropy(data):
+  # Calculate the frequency of each element in the list
+  frequency_dict = Counter(data)
+  # Calculate the entropy
+  entropy = 0
+  for key in frequency_dict:
+    # Calculate the relative frequency of each element
+    p = frequency_dict[key] / len(data)
+    # Add the contribution of each element to the entropy
+    entropy += -p * log2(p)
+  return entropy
+
+
+def statsFromSeries(s,srv_grouping : bool):
     s_size = len(s)
     d = {}
-    d["alert_name"] = s["json"].head(1).apply(foo).max()
+    d["alert_name"] = s["json"].head(1).apply(getAlertName).iat[0]
     # Convert IP to int first, then compute stddev
-    srv_ip_toN = s["srv_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
-    cli_ip_toN = s["cli_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
+    srv_ip_toN = s["srv_ip"].map(
+        lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
+    cli_ip_toN = s["cli_ip"].map(
+        lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
     # TODO find a way to compute something similar to entropy
-    d["srv_ip_S"] = entropy(srv_ip_toN)#srv_ip_toN.std()/srv_ip_toN.mean()
-    d["cli_ip_S"] = entropy(cli_ip_toN)#cli_ip_toN.std()/cli_ip_toN.mean()
-    d["srv_port_S"] = entropy(s["srv_port"])#s["srv_port"].std()/s["srv_port"].mean()
-    d["cli_port_S"] = entropy(s["cli_port"])#s["cli_port"].std()/s["srv_port"].mean()
+    d["srv_ip_S"] = shannon_entropy(srv_ip_toN)  # srv_ip_toN.std()/srv_ip_toN.mean()
+    d["cli_ip_S"] = shannon_entropy(cli_ip_toN)  # cli_ip_toN.std()/cli_ip_toN.mean()
+    # s["srv_port"].std()/s["srv_port"].mean()
+    d["srv_port_S"] = shannon_entropy(s["srv_port"])
+    # s["cli_port"].std()/s["srv_port"].mean()
+    d["cli_port_S"] = shannon_entropy(s["cli_port"])
     # Get blacklisted IPs and count how many they are
-    cli_ip_blk_df = s[["cli_ip","cli_blacklisted"]].loc[s["cli_blacklisted"] == True,"cli_ip"]
-    d["cli_ip_blk"] = cli_ip_blk_df.nunique()/len(cli_ip_blk_df)
-    d["srv_ip_blk"] = s["srv_blacklisted"].max()
+    cli_ip_blk_df = s[["cli_ip", "cli_blacklisted"]
+                      ].loc[s["cli_blacklisted"] == 1, "cli_ip"]
+    d["cli_ip_blk"] = (cli_ip_blk_df.nunique()/len(cli_ip_blk_df) if len(cli_ip_blk_df) else 0)
+    d["srv_ip_blk"] = s["srv_blacklisted"].iat[0]
     tdiff_avg_unrounded = s["tstamp"].diff().mean()
     d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
-    if d["tdiff_avg"].total_seconds() != 0: 
-        d["tdiff_CV"] = s["tstamp"].std()/tdiff_avg_unrounded    
+    if d["tdiff_avg"].total_seconds() != 0:
+        d["tdiff_CV"] = s["tstamp"].std()/tdiff_avg_unrounded
     else:
         d["tdiff_CV"] = -1
     d["score_avg"] = s["score"].mean()
-    d["NoUA"] = s["json"].apply(isUAmissing).sum()/s_size #TODO display as percentage
+    d["NoUA"] = s["json"].apply(isUAmissing).sum() / \
+        s_size  # TODO display as percentage
     d["size"] = s_size
-    d["X-Score"] = (math.log10(s_size) + 1) * (d["srv_port_S"]*10 + d["cli_port_S"]*10 + d["cli_ip_S"]*10 + d["srv_ip_blk"]*30 + pow(math.e,(-1)*(d["tdiff_CV"] if d["tdiff_CV"] != -1 else 0))*20 + d["score_avg"]/10)
+    d["X-Score"] = (math.log10(s_size) + 1) * (
+        # assign higher score to lower entropy...
+        ((log2(srv_ip_toN.nunique()) - d["srv_ip_S"] )* 10 if srv_grouping else 0 ) +
+        ((log2(cli_ip_toN.nunique()) - d["cli_ip_S"])*10 if not srv_grouping else 0) +
+        (log2(s["srv_port"].nunique()) - d["srv_port_S"])*10 +
+        (log2(s["cli_port"].nunique()) - d["cli_port_S"])*10 +
+        d["srv_ip_blk"]* (30 if s["alert_id"].iat[0] != 1 else 10) + # if alert isn't of type "blacklisted"
+        pow(math.e, (-1)*(d["tdiff_CV"] if d["tdiff_CV"] != -1 else 0))*20 + # lower tdiff_CV => High time periodicity 
+        d["score_avg"]/10 + # ntopng score avg
+        d["NoUA"]*50 # relevant only when BFT or HTTPsusUA
+        )
     # d["noUA_perc"] = s["json"]
-    return pd.Series(d, index=["alert_name","X-Score","srv_ip_S","cli_ip_S","srv_port_S","cli_port_S", "cli_ip_blk", "srv_ip_blk","tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
+    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
 
 
 pd.set_option("display.precision", 3)  # TODO change this?
-
+pd.set_option("display.max_rows",None)
 # TODO make the grouping parametric
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
@@ -240,12 +275,12 @@ pd.set_option("display.precision", 3)  # TODO change this?
 MIN_RELEVANT_GRP_SIZE = 3
 by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip", "vlan_id"])
-by_srv_ip = by_srv_ip.apply(statsFromSeries)
+by_srv_ip = by_srv_ip.apply(lambda x: statsFromSeries(x,srv_grouping=True))
 x = by_srv_ip.style.format({
     "cli_ip_blk": '{:,.2%}'.format,
     "NoUA": '{:,.2%}'.format
 })
-display(x)
+# display(x)
 print(by_srv_ip)
 # with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
 #     print(by_srv_ip["json"].apply(lambda x: foo(x)))
