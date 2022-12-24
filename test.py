@@ -21,6 +21,8 @@ import json
 import pandas as pd
 from types import SimpleNamespace
 import myenv
+from IPython.display import display
+import math
 
 # Defaults
 username = myenv.myusr
@@ -177,30 +179,52 @@ flag = False
 
 
 def isUAmissing(x):
+    y = json.loads(x)
+    try:
+        o = y["alert_generation"]["flow_risk_info"]
+        o = json.loads(o)
+        o = o["11"] # useless assignment, needed to trigger KeyError if "11" missing
+        return 1
+    except KeyError:
+        return 0
+    # TODO remove
     if x.find("Empty or missing User-Agent") != -1:
         return 1
     return 0
 
 
+def foo(x):
+    o = json.loads(x)
+    try:
+        return o["alert_generation"]["script_key"]
+    except KeyError:
+        return "no_name"
+
 def statsFromSeries(s):
     s_size = len(s)
     d = {}
-    d["srv_port_CV"] = s["srv_port"].std()/s_size
-    d["cli_port_CV"] = s["cli_port"].std()/s_size
-    d["cli_ip_CV"] = s["cli_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0]).std()/s_size
-    d["cli_ip_blk"] = s["cli_blacklisted"].sum()
+    d["alert_name"] = s["json"].head(1).apply(foo).max()
+    d["srv_port_CV"] = s["srv_port"].std()/s["srv_port"].mean()
+    d["cli_port_CV"] = s["cli_port"].std()/s["srv_port"].mean()
+    # Convert IP to int first, then compute stddev
+    cli_ip_toN = s["cli_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
+    d["cli_ip_CV"] = cli_ip_toN.std()/cli_ip_toN.mean()
+    # Get blacklisted IPs and count how many they are
+    cli_ip_blk_df = s[["cli_ip","cli_blacklisted"]].loc[s["cli_blacklisted"] == True,"cli_ip"]
+    d["cli_ip_blk"] = cli_ip_blk_df.nunique()/len(cli_ip_blk_df)
     d["srv_ip_blk"] = s["srv_blacklisted"].max()
     tdiff_avg_unrounded = s["tstamp"].diff().mean()
     d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
-    if d["tdiff_avg"] != 0: 
+    if d["tdiff_avg"].total_seconds() != 0: 
         d["tdiff_CV"] = s["tstamp"].std()/tdiff_avg_unrounded    
     else:
-        -1
+        d["tdiff_CV"] = -1
     d["score_avg"] = s["score"].mean()
-    d["NoUA"] = s["json"].apply(isUAmissing).sum()
+    d["NoUA"] = s["json"].apply(isUAmissing).sum()/s_size #TODO display as percentage
     d["size"] = s_size
+    d["X-Score"] = (math.log10(s_size) + 1) * (d["srv_port_CV"]*10 + d["cli_port_CV"]*10 + d["cli_ip_CV"]*10 + d["srv_ip_blk"]*30 + pow(math.e,(-1)*(d["tdiff_CV"] if d["tdiff_CV"] != -1 else 0))*20 + d["score_avg"]/10)
     # d["noUA_perc"] = s["json"]
-    return pd.Series(d, index=["srv_port_CV","cli_ip_CV","cli_port_CV", "cli_ip_blk", "srv_ip_blk","tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
+    return pd.Series(d, index=["alert_name","X-Score","srv_port_CV","cli_ip_CV","cli_port_CV", "cli_ip_blk", "srv_ip_blk","tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
 
 
 pd.set_option("display.precision", 3)  # TODO change this?
@@ -212,7 +236,13 @@ pd.set_option("display.precision", 3)  # TODO change this?
 MIN_RELEVANT_GRP_SIZE = 3
 by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip", "vlan_id"])
-print(by_srv_ip.apply(statsFromSeries))
+by_srv_ip = by_srv_ip.apply(statsFromSeries)
+x = by_srv_ip.style.format({
+    "cli_ip_blk": '{:,.2%}'.format,
+    "NoUA": '{:,.2%}'.format
+})
+display(x)
+print(by_srv_ip)
 # with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
 #     print(by_srv_ip["json"].apply(lambda x: foo(x)))
 
