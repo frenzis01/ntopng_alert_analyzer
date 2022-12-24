@@ -23,6 +23,7 @@ from types import SimpleNamespace
 import myenv
 from IPython.display import display
 import math
+from scipy.stats import entropy
 
 # Defaults
 username = myenv.myusr
@@ -204,11 +205,14 @@ def statsFromSeries(s):
     s_size = len(s)
     d = {}
     d["alert_name"] = s["json"].head(1).apply(foo).max()
-    d["srv_port_CV"] = s["srv_port"].std()/s["srv_port"].mean()
-    d["cli_port_CV"] = s["cli_port"].std()/s["srv_port"].mean()
     # Convert IP to int first, then compute stddev
+    srv_ip_toN = s["srv_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
     cli_ip_toN = s["cli_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
-    d["cli_ip_CV"] = cli_ip_toN.std()/cli_ip_toN.mean()
+    # TODO find a way to compute something similar to entropy
+    d["srv_ip_S"] = entropy(srv_ip_toN)#srv_ip_toN.std()/srv_ip_toN.mean()
+    d["cli_ip_S"] = entropy(cli_ip_toN)#cli_ip_toN.std()/cli_ip_toN.mean()
+    d["srv_port_S"] = entropy(s["srv_port"])#s["srv_port"].std()/s["srv_port"].mean()
+    d["cli_port_S"] = entropy(s["cli_port"])#s["cli_port"].std()/s["srv_port"].mean()
     # Get blacklisted IPs and count how many they are
     cli_ip_blk_df = s[["cli_ip","cli_blacklisted"]].loc[s["cli_blacklisted"] == True,"cli_ip"]
     d["cli_ip_blk"] = cli_ip_blk_df.nunique()/len(cli_ip_blk_df)
@@ -222,9 +226,9 @@ def statsFromSeries(s):
     d["score_avg"] = s["score"].mean()
     d["NoUA"] = s["json"].apply(isUAmissing).sum()/s_size #TODO display as percentage
     d["size"] = s_size
-    d["X-Score"] = (math.log10(s_size) + 1) * (d["srv_port_CV"]*10 + d["cli_port_CV"]*10 + d["cli_ip_CV"]*10 + d["srv_ip_blk"]*30 + pow(math.e,(-1)*(d["tdiff_CV"] if d["tdiff_CV"] != -1 else 0))*20 + d["score_avg"]/10)
+    d["X-Score"] = (math.log10(s_size) + 1) * (d["srv_port_S"]*10 + d["cli_port_S"]*10 + d["cli_ip_S"]*10 + d["srv_ip_blk"]*30 + pow(math.e,(-1)*(d["tdiff_CV"] if d["tdiff_CV"] != -1 else 0))*20 + d["score_avg"]/10)
     # d["noUA_perc"] = s["json"]
-    return pd.Series(d, index=["alert_name","X-Score","srv_port_CV","cli_ip_CV","cli_port_CV", "cli_ip_blk", "srv_ip_blk","tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
+    return pd.Series(d, index=["alert_name","X-Score","srv_ip_S","cli_ip_S","srv_port_S","cli_port_S", "cli_ip_blk", "srv_ip_blk","tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
 
 
 pd.set_option("display.precision", 3)  # TODO change this?
