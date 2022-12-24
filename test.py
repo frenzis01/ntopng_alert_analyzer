@@ -95,6 +95,7 @@ except ValueError as e:
     print(e)
     os._exit(-1)
 
+# currently unused
 dtypes = {
     "srv_port":             "int",
     "tstamp_end":           "datetime64[s]",
@@ -180,11 +181,6 @@ df[["is_srv_victim", "srv_blacklisted", "cli_blacklisted", "is_srv_attacker", "i
 df = df.sort_values(by=["tstamp"])
 
 
-flag = False
-
-
-
-
 def isUAmissing(x):
     y = json.loads(x)
     try:
@@ -237,10 +233,14 @@ def statsFromSeries(s,srv_grouping : bool):
     # s["cli_port"].std()/s["srv_port"].mean()
     d["cli_port_S"] = shannon_entropy(s["cli_port"])
     # Get blacklisted IPs and count how many they are
-    cli_ip_blk_df = s[["cli_ip", "cli_blacklisted"]
-                      ].loc[s["cli_blacklisted"] == 1, "cli_ip"]
-    d["cli_ip_blk"] = (cli_ip_blk_df.nunique()/len(cli_ip_blk_df) if len(cli_ip_blk_df) else 0)
-    d["srv_ip_blk"] = s["srv_blacklisted"].iat[0]
+    if (srv_grouping):
+        cli_ip_blk_df = s[["cli_ip", "cli_blacklisted"]].loc[s["cli_blacklisted"] == 1, "cli_ip"]
+        d["cli_ip_blk"] = (cli_ip_blk_df.nunique()/len(cli_ip_blk_df) if len(cli_ip_blk_df) else 0)
+        d["srv_ip_blk"] = s["srv_blacklisted"].iat[0]
+    else:
+        srv_ip_blk_df = s[["srv_ip", "srv_blacklisted"]].loc[s["srv_blacklisted"] == 1, "srv_ip"]
+        d["srv_ip_blk"] = (srv_ip_blk_df.nunique()/len(srv_ip_blk_df) if len(srv_ip_blk_df) else 0)
+        d["cli_ip_blk"] = s["cli_blacklisted"].iat[0]
     tdiff_avg_unrounded = s["tstamp"].diff().mean()
     d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
     if d["tdiff_avg"].total_seconds() != 0:
@@ -251,8 +251,14 @@ def statsFromSeries(s,srv_grouping : bool):
     d["NoUA"] = s["json"].apply(isUAmissing).sum() / \
         s_size  # TODO display as percentage
     d["size"] = s_size
+
+    # X-SCORE CALCULATION
+    # TODO change (ip/port) weights depending on alert_id
+    # TODO cli2srv and srv2cli bytes
+    # TODO hostpool?
+    # TODO other json fields i.e. file name 
     d["X-Score"] = (math.log10(s_size) + 1) * (
-        # assign higher score to lower entropy...
+        # assign higher score to lower entropy
         ((log2(srv_ip_toN.nunique()) - d["srv_ip_S"] )* 10 if srv_grouping else 0 ) +
         ((log2(cli_ip_toN.nunique()) - d["cli_ip_S"])*10 if not srv_grouping else 0) +
         (log2(s["srv_port"].nunique()) - d["srv_port_S"])*10 +
@@ -268,10 +274,10 @@ def statsFromSeries(s,srv_grouping : bool):
 
 pd.set_option("display.precision", 3)  # TODO change this?
 pd.set_option("display.max_rows",None)
+
 # TODO make the grouping parametric
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
-#
 MIN_RELEVANT_GRP_SIZE = 3
 by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip", "vlan_id"])
@@ -280,10 +286,14 @@ x = by_srv_ip.style.format({
     "cli_ip_blk": '{:,.2%}'.format,
     "NoUA": '{:,.2%}'.format
 })
-# display(x)
+print("SERVER IP GROUPING\n-------------------------------------\n")
 print(by_srv_ip)
-# with pd.option_context('display.max_rows', None, 'display.max_columns', None):  # more options can be specified also
-#     print(by_srv_ip["json"].apply(lambda x: foo(x)))
 
+by_cli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
+    lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "cli_ip", "vlan_id"])
+by_cli_ip = by_cli_ip.apply(lambda x: statsFromSeries(x,srv_grouping=False))
 
-# os._exit(0)
+print("CLIENT IP GROUPING\n-------------------------------------\n")
+print(by_cli_ip)
+
+#TODO intersect by_cli_ip and by_srv_ip
