@@ -151,7 +151,7 @@ try:
 
     my_historical = Historical(my_ntopng)
     last15minutes = (datetime.datetime.now() -
-                     datetime.timedelta(minutes=15)).strftime('%s')
+                     datetime.timedelta(minutes=30)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
         '%s'), "*", "severity = 5", 10000, "", "")
     # TODO change maxhits
@@ -203,17 +203,45 @@ def getAlertName(x):
     except KeyError:
         return "no_name"
 
+def getBFTfilename(x):
+    o = json.loads(x)
+    try :
+        return json.loads(o["alert_genation"]["last_url"])
+    except KeyError:
+        return math.nan
+
 def shannon_entropy(data):
-  # Calculate the frequency of each element in the list
-  frequency_dict = Counter(data)
-  # Calculate the entropy
-  entropy = 0
-  for key in frequency_dict:
-    # Calculate the relative frequency of each element
-    p = frequency_dict[key] / len(data)
-    # Add the contribution of each element to the entropy
-    entropy += -p * log2(p)
-  return entropy
+    # Calculate the frequency of each element in the list
+    frequency_dict = Counter(data)
+    # Calculate the entropy
+    S_entropy = 0
+    p_sum = 0
+    probabilities = []
+    # print("------------------------")
+    for key in frequency_dict:
+        # print(str(key) + " " + str(frequency_dict[key]))
+        # Calculate the relative frequency of each element
+        # p = frequency_dict[key] / len(data)
+        p_sum += (float) (frequency_dict[key] / len(data))
+        probabilities.append((float) (frequency_dict[key] / len(data)))
+        # Add the contribution of each element to the entropy
+        # entropy += p * log2(1/p)
+    # if (len(probabilities) > 1) and p_sum < 0.99:
+    #     print(str(p_sum) + " -> " + str(probabilities))
+    l = len(frequency_dict)
+    S_entropy = 0 if l == 1 else entropy(probabilities,base=l)
+    return S_entropy
+
+def shannon_entropy_bit(data):
+    # Calculate the frequency of each element in the list
+    bits = ""
+    for x in data:
+        bits += ("{0:b}".format(x))
+    ones = bits.count("1")
+    l = len(bits)
+    
+    S_entropy = entropy([ones/l,(l-ones)/l],base=2)
+    return S_entropy
 
 
 def statsFromSeries(s,srv_grouping : bool):
@@ -225,9 +253,10 @@ def statsFromSeries(s,srv_grouping : bool):
         lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
     cli_ip_toN = s["cli_ip"].map(
         lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
-    # TODO find a way to compute something similar to entropy
+    # TODO okay to normalize entropy with a percentage?
     d["srv_ip_S"] = shannon_entropy(srv_ip_toN)  # srv_ip_toN.std()/srv_ip_toN.mean()
     d["cli_ip_S"] = shannon_entropy(cli_ip_toN)  # cli_ip_toN.std()/cli_ip_toN.mean()
+    d["cli_ip_S_b"] = shannon_entropy_bit(cli_ip_toN)  # cli_ip_toN.std()/cli_ip_toN.mean()
     # s["srv_port"].std()/s["srv_port"].mean()
     d["srv_port_S"] = shannon_entropy(s["srv_port"])
     # s["cli_port"].std()/s["srv_port"].mean()
@@ -251,6 +280,11 @@ def statsFromSeries(s,srv_grouping : bool):
     d["NoUA"] = s["json"].apply(isUAmissing).sum() / \
         s_size  # TODO display as percentage
     d["size"] = s_size
+    d["N_cli_ip_S"] = (log2(cli_ip_toN.nunique()))
+    #check if same file
+    bft_same_file = 1 if (s["json"].apply(getBFTfilename).nunique() == 1) else 0
+    if bft_same_file:
+        print("\t   ---BFT SAME FILE ON "+s["srv_ip"].iat[0])
 
     # X-SCORE CALCULATION
     # TODO change (ip/port) weights depending on alert_id
@@ -259,17 +293,19 @@ def statsFromSeries(s,srv_grouping : bool):
     # TODO other json fields i.e. file name 
     d["X-Score"] = (math.log10(s_size) + 1) * (
         # assign higher score to lower entropy
-        ((log2(srv_ip_toN.nunique()) - d["srv_ip_S"] )* 10 if srv_grouping else 0 ) +
-        ((log2(cli_ip_toN.nunique()) - d["cli_ip_S"])*10 if not srv_grouping else 0) +
-        (log2(s["srv_port"].nunique()) - d["srv_port_S"])*10 +
-        (log2(s["cli_port"].nunique()) - d["cli_port_S"])*10 +
+        ((d["srv_ip_S"])* 10 if srv_grouping else 0 ) +
+        ((d["cli_ip_S"])*10 if not srv_grouping else 0) +
+        (d["srv_port_S"])*10 +
+        (d["cli_port_S"])*10 +
         d["srv_ip_blk"]* (30 if s["alert_id"].iat[0] != 1 else 10) + # if alert isn't of type "blacklisted"
+        d["cli_ip_blk"]* (30 if s["alert_id"].iat[0] != 1 else 10) + # if alert isn't of type "blacklisted"
         pow(math.e, (-1)*(d["tdiff_CV"] if d["tdiff_CV"] != -1 else 0))*20 + # lower tdiff_CV => High time periodicity 
         d["score_avg"]/10 + # ntopng score avg
-        d["NoUA"]*50 # relevant only when BFT or HTTPsusUA
+        d["NoUA"]*30 +# relevant only when BFT or HTTPsusUA
+        bft_same_file*15
         )
     # d["noUA_perc"] = s["json"]
-    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
+    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S","N_cli_ip_S", "cli_ip_S","cli_ip_S_b", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
 
 
 pd.set_option("display.precision", 3)  # TODO change this?
@@ -287,13 +323,21 @@ x = by_srv_ip.style.format({
     "NoUA": '{:,.2%}'.format
 })
 print("SERVER IP GROUPING\n-------------------------------------\n")
-print(by_srv_ip)
+# print(by_srv_ip.sort_values("X-Score",ascending=False))
+print(by_srv_ip.sort_values("X-Score",ascending=False).head(20))
+x_avg = by_srv_ip["X-Score"].mean()
+print(by_srv_ip.sort_values("size").loc[by_srv_ip["X-Score"]<x_avg].tail(20))
 
 by_cli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "cli_ip", "vlan_id"])
 by_cli_ip = by_cli_ip.apply(lambda x: statsFromSeries(x,srv_grouping=False))
 
-print("CLIENT IP GROUPING\n-------------------------------------\n")
-print(by_cli_ip)
+# Get IPs that generate many alert types
+# print(by_srv_ip.index.to_frame(index=False).groupby(["vlan_id","srv_ip"]).count())
+
+# print("CLIENT IP GROUPING\n-------------------------------------\n")
+# print(by_cli_ip.sort_values("X-Score",ascending=False).head(20))
+# x_avg = by_cli_ip["X-Score"].mean()
+# print(by_cli_ip.sort_values("size").loc[by_cli_ip["X-Score"]<x_avg].tail(20))
 
 #TODO intersect by_cli_ip and by_srv_ip
