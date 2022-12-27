@@ -159,9 +159,7 @@ except ValueError as e:
     print(e)
     os._exit(-1)
 
-# print(json.dumps(raw_alerts, indent=2))
 df = pd.DataFrame(raw_alerts)
-# print(df.dtypes)
 
 # convert dtypes
 df[["tstamp", "tstamp_end", "user_label_tstamp"]] = df[[
@@ -213,53 +211,34 @@ def getBFTfilename(x):
 def shannon_entropy(data):
     # Calculate the frequency of each element in the list
     frequency_dict = Counter(data)
-    # Calculate the entropy
     S_entropy = 0
-    p_sum = 0
-    probabilities = []
-    # print("------------------------")
+    probabilities = [] # 
+    # Calculate the entropy
     for key in frequency_dict:
-        # print(str(key) + " " + str(frequency_dict[key]))
         # Calculate the relative frequency of each element
-        # p = frequency_dict[key] / len(data)
-        p_sum += (float) (frequency_dict[key] / len(data))
-        probabilities.append((float) (frequency_dict[key] / len(data)))
-        # Add the contribution of each element to the entropy
-        # entropy += p * log2(1/p)
-    # if (len(probabilities) > 1) and p_sum < 0.99:
-    #     print(str(p_sum) + " -> " + str(probabilities))
+        # and the related probability
+        probabilities.append(frequency_dict[key] / len(data))
+
+    # Use l as the log base, to normalize the result and
+    # get a value between 0 and 1
     l = len(frequency_dict)
     S_entropy = 0 if l == 1 else entropy(probabilities,base=l)
     return S_entropy
 
-def shannon_entropy_bit(data):
-    # Calculate the frequency of each element in the list
-    bits = ""
-    for x in data:
-        bits += ("{0:b}".format(x))
-    ones = bits.count("1")
-    l = len(bits)
-    
-    S_entropy = entropy([ones/l,(l-ones)/l],base=2)
-    return S_entropy
-
+def ip2int(x):
+    return struct.unpack("!I", socket.inet_aton(x))[0]
 
 def statsFromSeries(s,srv_grouping : bool):
     s_size = len(s)
     d = {}
     d["alert_name"] = s["json"].head(1).apply(getAlertName).iat[0]
-    # Convert IP to int first, then compute stddev
-    srv_ip_toN = s["srv_ip"].map(
-        lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
-    cli_ip_toN = s["cli_ip"].map(
-        lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
-    # TODO okay to normalize entropy with a percentage?
-    d["srv_ip_S"] = shannon_entropy(srv_ip_toN)  # srv_ip_toN.std()/srv_ip_toN.mean()
-    d["cli_ip_S"] = shannon_entropy(cli_ip_toN)  # cli_ip_toN.std()/cli_ip_toN.mean()
-    d["cli_ip_S_b"] = shannon_entropy_bit(cli_ip_toN)  # cli_ip_toN.std()/cli_ip_toN.mean()
-    # s["srv_port"].std()/s["srv_port"].mean()
+    # Convert IP to int first, then compute entropy
+    srv_ip_toN = s["srv_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
+    cli_ip_toN = s["cli_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
+    # Entropy
+    d["srv_ip_S"] = shannon_entropy(srv_ip_toN) 
+    d["cli_ip_S"] = shannon_entropy(cli_ip_toN) 
     d["srv_port_S"] = shannon_entropy(s["srv_port"])
-    # s["cli_port"].std()/s["srv_port"].mean()
     d["cli_port_S"] = shannon_entropy(s["cli_port"])
     # Get blacklisted IPs and count how many they are
     if (srv_grouping):
@@ -270,18 +249,21 @@ def statsFromSeries(s,srv_grouping : bool):
         srv_ip_blk_df = s[["srv_ip", "srv_blacklisted"]].loc[s["srv_blacklisted"] == 1, "srv_ip"]
         d["srv_ip_blk"] = (srv_ip_blk_df.nunique()/len(srv_ip_blk_df) if len(srv_ip_blk_df) else 0)
         d["cli_ip_blk"] = s["cli_blacklisted"].iat[0]
+    # Periodicity
     tdiff_avg_unrounded = s["tstamp"].diff().mean()
     d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
     if d["tdiff_avg"].total_seconds() != 0:
         d["tdiff_CV"] = s["tstamp"].std()/tdiff_avg_unrounded
     else:
-        d["tdiff_CV"] = -1
+        # negative value to indicate close-to-zero period
+        d["tdiff_CV"] = -1 #TODO fix
+    # NTOPNG score average
     d["score_avg"] = s["score"].mean()
-    d["NoUA"] = s["json"].apply(isUAmissing).sum() / \
-        s_size  # TODO display as percentage
+    # Missing User-Agent percentage (0<p<1 format)
+    d["noUA_perc"] = s["json"].apply(isUAmissing).sum() / s_size
     d["size"] = s_size
-    d["N_cli_ip_S"] = (log2(cli_ip_toN.nunique()))
-    #check if same file
+    # BinaryFileTransfer -> Check if same file
+    #  Note: nunique() doesn't count NaN values
     bft_same_file = 1 if (s["json"].apply(getBFTfilename).nunique() == 1) else 0
     if bft_same_file:
         print("\t   ---BFT SAME FILE ON "+s["srv_ip"].iat[0])
@@ -301,17 +283,18 @@ def statsFromSeries(s,srv_grouping : bool):
         d["cli_ip_blk"]* (30 if s["alert_id"].iat[0] != 1 else 10) + # if alert isn't of type "blacklisted"
         pow(math.e, (-1)*(d["tdiff_CV"] if d["tdiff_CV"] != -1 else 0))*20 + # lower tdiff_CV => High time periodicity 
         d["score_avg"]/10 + # ntopng score avg
-        d["NoUA"]*30 +# relevant only when BFT or HTTPsusUA
+        d["noUA_perc"]*30 +# relevant only when BFT or HTTPsusUA
         bft_same_file*15
         )
-    # d["noUA_perc"] = s["json"]
-    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S","N_cli_ip_S", "cli_ip_S","cli_ip_S_b", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "NoUA", "size"])
+    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "noUA_perc", "size"])
 
 
-pd.set_option("display.precision", 3)  # TODO change this?
+
+pd.set_option("display.precision", 3)
 pd.set_option("display.max_rows",None)
 
 # TODO make the grouping parametric
+
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
 MIN_RELEVANT_GRP_SIZE = 3
@@ -320,19 +303,20 @@ by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
 by_srv_ip = by_srv_ip.apply(lambda x: statsFromSeries(x,srv_grouping=True))
 x = by_srv_ip.style.format({
     "cli_ip_blk": '{:,.2%}'.format,
-    "NoUA": '{:,.2%}'.format
+    "noUA_perc": '{:,.2%}'.format
 })
 print("SERVER IP GROUPING\n-------------------------------------\n")
-# print(by_srv_ip.sort_values("X-Score",ascending=False))
+print("----TOP X-SCORE")
 print(by_srv_ip.sort_values("X-Score",ascending=False).head(20))
 x_avg = by_srv_ip["X-Score"].mean()
 print(by_srv_ip.sort_values("size").loc[by_srv_ip["X-Score"]<x_avg].tail(20))
 
+print("----LOWER SCORE - HIGHER SIZE")
 by_cli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "cli_ip", "vlan_id"])
 by_cli_ip = by_cli_ip.apply(lambda x: statsFromSeries(x,srv_grouping=False))
 
-# Get IPs that generate many alert types
+# TODO Get IPs that generate many alert types
 # print(by_srv_ip.index.to_frame(index=False).groupby(["vlan_id","srv_ip"]).count())
 
 # print("CLIENT IP GROUPING\n-------------------------------------\n")
