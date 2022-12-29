@@ -308,8 +308,8 @@ pd.set_option("display.max_rows",None)
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
 MIN_RELEVANT_GRP_SIZE = 5
-by_srvcli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
-    lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "cli_ip", "vlan_id"])
+by_srvcli_ip = df.groupby(["alert_id", "srv_ip","cli_ip", "vlan_id"]).filter(
+    lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip","cli_ip", "vlan_id"])
 by_srvcli_ip = by_srvcli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
 
 print("\nSERVER-CLIENT IP GROUPING\n-------------------------------------\n")
