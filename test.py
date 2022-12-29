@@ -312,20 +312,11 @@ by_srvcli_ip = df.groupby(["alert_id", "srv_ip","cli_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip","cli_ip", "vlan_id"])
 by_srvcli_ip = by_srvcli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
 
-# keys = list(by_srvcli_ip.columns.values)
-# i1 = df.set_index(keys).index
-# i2 = by_srvcli_ip.set_index(keys).index
-# df = df[~i1.isin(i2)]
-# print(df.head(10))
-
-# print(df[["cli_ip","srv_ip","alert_id","vlan_id"]].sort_values(["cli_ip","srv_ip","alert_id","vlan_id"]))
-
 df = df.merge(by_srvcli_ip, on=["alert_id", "srv_ip",
          "cli_ip", "vlan_id"], how='outer', indicator=True)\
     .query('_merge=="left_only"')\
     .drop('_merge', axis=1)
 
-# print(df[["cli_ip","srv_ip","alert_id","vlan_id"]].sort_values(["cli_ip","srv_ip","alert_id","vlan_id"]))
 
 
 print("\nSERVER-CLIENT IP GROUPING\n-------------------------------------\n")
