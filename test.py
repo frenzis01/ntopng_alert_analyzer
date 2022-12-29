@@ -154,7 +154,7 @@ try:
     last15minutes = (datetime.datetime.now() -
                      datetime.timedelta(minutes=30)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
-        '%s'), "*", "severity = 5", 10000, "", "")
+        '%s'), "*", "severity = 5", 50000, "", "")
     f = open("response.json", "w")
     f.write(str(raw_alerts))
     f.close()
@@ -299,18 +299,34 @@ def statsFromSeries(s,GRP_CRIT: int):
     return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "noUA_perc", "size"])
 
 
-
 pd.set_option("display.precision", 3)
 pd.set_option("display.max_rows",None)
+
 
 # TODO make the grouping parametric
 
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
-MIN_RELEVANT_GRP_SIZE = 5
+MIN_RELEVANT_GRP_SIZE = 2
 by_srvcli_ip = df.groupby(["alert_id", "srv_ip","cli_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip","cli_ip", "vlan_id"])
 by_srvcli_ip = by_srvcli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
+
+# keys = list(by_srvcli_ip.columns.values)
+# i1 = df.set_index(keys).index
+# i2 = by_srvcli_ip.set_index(keys).index
+# df = df[~i1.isin(i2)]
+# print(df.head(10))
+
+# print(df[["cli_ip","srv_ip","alert_id","vlan_id"]].sort_values(["cli_ip","srv_ip","alert_id","vlan_id"]))
+
+df = df.merge(by_srvcli_ip, on=["alert_id", "srv_ip",
+         "cli_ip", "vlan_id"], how='outer', indicator=True)\
+    .query('_merge=="left_only"')\
+    .drop('_merge', axis=1)
+
+# print(df[["cli_ip","srv_ip","alert_id","vlan_id"]].sort_values(["cli_ip","srv_ip","alert_id","vlan_id"]))
+
 
 print("\nSERVER-CLIENT IP GROUPING\n-------------------------------------\n")
 print("----TOP X-SCORE")
@@ -320,10 +336,6 @@ x_avg = by_srvcli_ip["X-Score"].mean()
 print("----LOWER SCORE - HIGHER SIZE")
 print(by_srvcli_ip.sort_values("size",ascending=False).loc[by_srvcli_ip["X-Score"]<x_avg].head(10))
 
-# df = df.merge(by_srvcli_ip, on=["alert_id", "srv_ip",
-#          "cli_ip", "vlan_id"], how='outer', indicator=True)\
-#     .query('_merge=="left_only"')\
-#     .drop('_merge', axis=1)
 
 
 
