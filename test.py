@@ -26,13 +26,14 @@ import math
 from scipy.stats import entropy
 from collections import Counter
 from math import log2
+import ast
 
 
 # Defaults
 username = myenv.myusr
 password = myenv.mykey
 ntopng_url = myenv.myurl
-iface_id = 12  # all
+iface_id = 12  # 12 = all
 auth_token = None
 enable_debug = False
 host_ip = "192.168.1.1"  # useful only for -H option
@@ -154,6 +155,9 @@ try:
                      datetime.timedelta(minutes=30)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
         '%s'), "*", "severity = 5", 10000, "", "")
+    f = open("response.json", "w")
+    f.write(str(raw_alerts))
+    f.close()
     # TODO change maxhits
 except ValueError as e:
     print(e)
@@ -228,7 +232,11 @@ def shannon_entropy(data):
 def ip2int(x):
     return struct.unpack("!I", socket.inet_aton(x))[0]
 
-def statsFromSeries(s,srv_grouping : bool):
+
+GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
+def statsFromSeries(s,GRP_CRIT: int):
+    if GRP_CRIT not in range(3):
+        raise Exception("Invalid grouping criteria")
     s_size = len(s)
     d = {}
     d["alert_name"] = s["json"].head(1).apply(getAlertName).iat[0]
@@ -241,11 +249,13 @@ def statsFromSeries(s,srv_grouping : bool):
     d["srv_port_S"] = shannon_entropy(s["srv_port"])
     d["cli_port_S"] = shannon_entropy(s["cli_port"])
     # Get blacklisted IPs and count how many they are
-    if (srv_grouping):
+    d["srv_ip_blk"] = 0
+    d["cli_ip_blk"] = 0
+    if (GRP_CRIT == GRP_SRV):
         cli_ip_blk_df = s[["cli_ip", "cli_blacklisted"]].loc[s["cli_blacklisted"] == 1, "cli_ip"]
         d["cli_ip_blk"] = (cli_ip_blk_df.nunique()/len(cli_ip_blk_df) if len(cli_ip_blk_df) else 0)
         d["srv_ip_blk"] = s["srv_blacklisted"].iat[0]
-    else:
+    elif (GRP_CRIT == GRP_SRVCLI):
         srv_ip_blk_df = s[["srv_ip", "srv_blacklisted"]].loc[s["srv_blacklisted"] == 1, "srv_ip"]
         d["srv_ip_blk"] = (srv_ip_blk_df.nunique()/len(srv_ip_blk_df) if len(srv_ip_blk_df) else 0)
         d["cli_ip_blk"] = s["cli_blacklisted"].iat[0]
@@ -275,12 +285,12 @@ def statsFromSeries(s,srv_grouping : bool):
     # TODO other json fields i.e. file name 
     d["X-Score"] = (math.log10(s_size) + 1) * (
         # assign higher score to lower entropy
-        ((d["srv_ip_S"])* 10 if srv_grouping else 0 ) +
-        ((d["cli_ip_S"])*10 if not srv_grouping else 0) +
+        ((d["srv_ip_S"])* 10) +
+        ((d["cli_ip_S"])*10) +
         (d["srv_port_S"])*10 +
         (d["cli_port_S"])*10 +
-        d["srv_ip_blk"]* (30 if s["alert_id"].iat[0] != 1 else 10) + # if alert isn't of type "blacklisted"
-        d["cli_ip_blk"]* (30 if s["alert_id"].iat[0] != 1 else 10) + # if alert isn't of type "blacklisted"
+        d["srv_ip_blk"]* (20 if s["alert_id"].iat[0] != 1 else 10) + # if alert isn't of type "blacklisted"
+        d["cli_ip_blk"]* (20 if s["alert_id"].iat[0] != 1 else 10) + # if alert isn't of type "blacklisted"
         pow(math.e, (-1)*(d["tdiff_CV"] if d["tdiff_CV"] != -1 else 0))*20 + # lower tdiff_CV => High time periodicity 
         d["score_avg"]/10 + # ntopng score avg
         d["noUA_perc"]*30 +# relevant only when BFT or HTTPsusUA
@@ -297,24 +307,55 @@ pd.set_option("display.max_rows",None)
 
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
-MIN_RELEVANT_GRP_SIZE = 3
+MIN_RELEVANT_GRP_SIZE = 5
+by_srvcli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
+    lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "cli_ip", "vlan_id"])
+by_srvcli_ip = by_srvcli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
+
+print("\nSERVER-CLIENT IP GROUPING\n-------------------------------------\n")
+print("----TOP X-SCORE")
+print(by_srvcli_ip.sort_values("X-Score",ascending=False).head(10))
+
+x_avg = by_srvcli_ip["X-Score"].mean()
+print("----LOWER SCORE - HIGHER SIZE")
+print(by_srvcli_ip.sort_values("size",ascending=False).loc[by_srvcli_ip["X-Score"]<x_avg].head(10))
+
+# df = df.merge(by_srvcli_ip, on=["alert_id", "srv_ip",
+#          "cli_ip", "vlan_id"], how='outer', indicator=True)\
+#     .query('_merge=="left_only"')\
+#     .drop('_merge', axis=1)
+
+
+
+
 by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip", "vlan_id"])
-by_srv_ip = by_srv_ip.apply(lambda x: statsFromSeries(x,srv_grouping=True))
-x = by_srv_ip.style.format({
-    "cli_ip_blk": '{:,.2%}'.format,
-    "noUA_perc": '{:,.2%}'.format
-})
+by_srv_ip = by_srv_ip.apply(lambda x: statsFromSeries(x,GRP_SRV))
 print("SERVER IP GROUPING\n-------------------------------------\n")
 print("----TOP X-SCORE")
-print(by_srv_ip.sort_values("X-Score",ascending=False).head(20))
-x_avg = by_srv_ip["X-Score"].mean()
-print(by_srv_ip.sort_values("size").loc[by_srv_ip["X-Score"]<x_avg].tail(20))
+print(by_srv_ip.sort_values("X-Score",ascending=False).head(10))
 
+x_avg = by_srv_ip["X-Score"].mean()
 print("----LOWER SCORE - HIGHER SIZE")
+print(by_srv_ip.sort_values("size",ascending=False).loc[by_srv_ip["X-Score"]<x_avg].head(10))
+
+
 by_cli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "cli_ip", "vlan_id"])
-by_cli_ip = by_cli_ip.apply(lambda x: statsFromSeries(x,srv_grouping=False))
+by_cli_ip = by_cli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
+print("\nCLIENT IP GROUPING\n-------------------------------------\n")
+print("----TOP X-SCORE")
+print(by_cli_ip.sort_values("X-Score",ascending=False).head(10))
+
+x_avg = by_cli_ip["X-Score"].mean()
+print("----LOWER SCORE - HIGHER SIZE")
+print(by_cli_ip.sort_values("size",ascending=False).loc[by_cli_ip["X-Score"]<x_avg].head(10))
+
+
+
+# by_cli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
+#     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "cli_ip", "vlan_id"])
+# by_cli_ip = by_cli_ip.apply(lambda x: statsFromSeries(x,srv_grouping=False))
 
 # TODO Get IPs that generate many alert types
 # print(by_srv_ip.index.to_frame(index=False).groupby(["vlan_id","srv_ip"]).count())
