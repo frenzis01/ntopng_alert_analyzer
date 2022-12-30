@@ -150,20 +150,24 @@ dtypes = {
 }
 try:
 
+    print("\tSending request")
     my_historical = Historical(my_ntopng)
     last15minutes = (datetime.datetime.now() -
                      datetime.timedelta(minutes=30)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
         '%s'), "*", "severity = 5", 50000, "", "")
-    f = open("response.json", "w")
-    f.write(str(raw_alerts))
-    f.close()
+    # f = open("response.json", "w")
+    # f.write(str(raw_alerts))
+    # f.close()
+    # TODO remove response writing
     # TODO change maxhits
 except ValueError as e:
     print(e)
     os._exit(-1)
 
+print("\tParsing response")
 df = pd.DataFrame(raw_alerts)
+print("\tParsed response")
 
 # convert dtypes
 df[["tstamp", "tstamp_end", "user_label_tstamp"]] = df[[
@@ -181,6 +185,7 @@ df[["is_srv_victim", "srv_blacklisted", "cli_blacklisted", "is_srv_attacker", "i
 
 # sort on tstamp
 df = df.sort_values(by=["tstamp"])
+print("\tSorted alerts")
 
 
 def isUAmissing(x):
@@ -208,7 +213,7 @@ def getAlertName(x):
 def getBFTfilename(x):
     o = json.loads(x)
     try :
-        return json.loads(o["alert_genation"]["last_url"])
+        return o["last_url"]
     except KeyError:
         return math.nan
 
@@ -243,7 +248,8 @@ def statsFromSeries(s: pd.Series,GRP_CRIT: int):
     # Convert IP to int first, then compute entropy
     srv_ip_toN = s["srv_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
     cli_ip_toN = s["cli_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
-    # Entropy
+    # Entropy (S)
+    # Note that entropy is normalized and ranges from 0 to 1
     d["srv_ip_S"] = shannon_entropy(srv_ip_toN) 
     d["cli_ip_S"] = shannon_entropy(cli_ip_toN) 
     d["srv_port_S"] = shannon_entropy(s["srv_port"])
@@ -263,7 +269,7 @@ def statsFromSeries(s: pd.Series,GRP_CRIT: int):
     tdiff_avg_unrounded = s["tstamp"].diff().mean()
     d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
     # If the avg period is close to 0... 
-    if d["tdiff_avg"].total_seconds() == 0:
+    if d["tdiff_avg"].total_seconds() == 0: # cannot divide by 0
         tdiff_avg_unrounded = pd.Timedelta(1,"s") #1.0 #... consider '1' as reference to compute CV
     # Compute CV as stddev/avg
     d["tdiff_CV"] = s["tstamp"].std()/tdiff_avg_unrounded
@@ -274,9 +280,15 @@ def statsFromSeries(s: pd.Series,GRP_CRIT: int):
     d["size"] = s_size
     # BinaryFileTransfer -> Check if same file
     #  Note: nunique() doesn't count NaN values
-    bft_same_file = 1 if (s["json"].apply(getBFTfilename).nunique() == 1) else 0
-    if bft_same_file:
-        print("\t   ---BFT SAME FILE ON "+s["srv_ip"].iat[0]) # TODO never appears... Need to validate
+    d["bft_same_file"] = ""
+    if (s["alert_id"].iat[0] == 29):
+        filenames = s["json"].apply(getBFTfilename)
+        # print(filenames)
+        # print(filenames.nunique())
+        d["bft_same_file"] = filenames.iat[0] if (filenames.nunique() == 1) else ""
+        # if d["bft_same_file"] != "":
+        #     print(d["bft_same_file"])
+        #     print(s["json"].iat[0])
 
     # X-SCORE CALCULATION
     # TODO change (ip/port) weights depending on alert_id
@@ -284,27 +296,28 @@ def statsFromSeries(s: pd.Series,GRP_CRIT: int):
     # TODO hostpool?
     # TODO other json fields i.e. file name 
     d["X-Score"] = (
-        math.log(s_size) +
-        # TODO assign higher score to lower entropy?
+        math.log(s_size) +  # Higher size => higher score
+        # multi-target groups, i.e. high IP entropy => Higher score
         ((d["srv_ip_S"])* 10) +
         ((d["cli_ip_S"])*10) +
+        # Inverse of common srv/cli behaviour, i.e. HIGH srv_port_S || LOW cli_port_S
+        #   => Higher score 
         (d["srv_port_S"])*10 +
-        (d["cli_port_S"])*10 +
+        (1 - d["cli_port_S"])*10 +
         # Extra points if communicating with blacklisted IPs
         d["srv_ip_blk"]* (20 if s["alert_id"].iat[0] != 1 else 5) + # if alert isn't of type "blacklisted"
         d["cli_ip_blk"]* (20 if s["alert_id"].iat[0] != 1 else 5) + # if alert isn't of type "blacklisted"
         # Periodicity score = e^(-CV)
          # lower tdiff_CV => High time periodicity 
-        # pow(math.e, ((-1.0)*d["tdiff_CV"] if d["tdiff_CV"] < 0.0 else d["tdiff_CV"]))*30 +
         pow(math.e, (-1.0)*d["tdiff_CV"]) +
         # ntopng avg score
         math.log2(d["score_avg"]) * 2 + # 70 -> ~12.4  | 300 -> ~16.5
         # percentage of missing user agent
         d["noUA_perc"]*20 +# relevant only when BFT or HTTPsusUA
         # Is the transferred file always the same?
-        bft_same_file*15
+        (1 if (d["bft_same_file"] != "") else 0) * 15
         )
-    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "noUA_perc", "size"])
+    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "noUA_perc", "size","bft_same_file"])
 
 
 pd.set_option("display.precision", 3)
@@ -320,6 +333,13 @@ by_srvcli_ip = df.groupby(["alert_id", "srv_ip","cli_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "srv_ip","cli_ip", "vlan_id"])
 by_srvcli_ip = by_srvcli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
 
+# Remove srvcli alerts from df, in this way:
+# SRV:CLI   The grouping on this set will result in
+# A:B       SRVCLI  =   [A:B A:B A:B]
+# A:B       SRV     =   [A:C A:D] instead of [A:B A:B A:B A:C A:D]
+# A:B
+# A:C
+# A:D
 df = df.merge(by_srvcli_ip, on=["alert_id", "srv_ip",
          "cli_ip", "vlan_id"], how='outer', indicator=True)\
     .query('_merge=="left_only"')\
@@ -344,19 +364,22 @@ by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
 by_srv_ip = by_srv_ip.apply(lambda x: statsFromSeries(x,GRP_SRV))
 print("\nSERVER IP GROUPING\n-------------------------------------\n")
 print("----TOP X-SCORE")
-print(by_srv_ip.sort_values("X-Score",ascending=False).head(10))
+# print(by_srv_ip.sort_values("srv_port_S",ascending=False).loc[by_srv_ip["alert_name"] != "blacklisted"].head(10))
+print(by_srv_ip.sort_values("srv_port_S",ascending=False).head(10))
 
 # x_avg = by_srv_ip["X-Score"].mean()
 # print("----LOWER SCORE - HIGHER SIZE")
 # print(by_srv_ip.sort_values("size",ascending=False).loc[by_srv_ip["X-Score"]<x_avg].head(10))
 
 
-by_cli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
+tmp = by_cli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
     lambda g: len(g) > MIN_RELEVANT_GRP_SIZE).groupby(["alert_id", "cli_ip", "vlan_id"])
 by_cli_ip = by_cli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
 print("\nCLIENT IP GROUPING\n-------------------------------------\n")
 print("----TOP X-SCORE")
-print(by_cli_ip.sort_values("X-Score",ascending=False).head(10))
+# print(by_cli_ip.sort_values("cli_port_S",ascending=True).query("alert_id not in [1,38]").head(10))
+print(by_cli_ip.sort_values("cli_port_S",ascending=True).head(10))
+# print(tmp.get_group((38,"172.28.5.38",2))[["srv_ip","cli_ip"]])
 
 # x_avg = by_cli_ip["X-Score"].mean()
 # print("----LOWER SCORE - HIGHER SIZE")
