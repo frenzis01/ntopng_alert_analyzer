@@ -266,6 +266,7 @@ def statsFromSeries(s: pd.Series,GRP_CRIT: int):
         d["srv_ip_blk"] = (srv_ip_blk_df.nunique()/len(srv_ip_blk_df) if len(srv_ip_blk_df) else 0)
         d["cli_ip_blk"] = s["cli_blacklisted"].iat[0]
     # Periodicity - AKA Time interval Coefficient of Variation (CV)
+    # TODO histogram rita-like
     tdiff_avg_unrounded = s["tstamp"].diff().mean()
     d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
     # If the avg period is close to 0... 
@@ -351,12 +352,6 @@ print("\nSERVER-CLIENT IP GROUPING\n-------------------------------------\n")
 print("----TOP X-SCORE")
 print(by_srvcli_ip.sort_values("X-Score",ascending=False).head(10))
 
-# x_avg = by_srvcli_ip["X-Score"].mean()
-# print("----LOWER SCORE - HIGHER SIZE")
-# print(by_srvcli_ip.sort_values("size",ascending=False).loc[by_srvcli_ip["X-Score"]<x_avg].head(10))
-
-
-
 
 
 by_srv_ip = df.groupby(["alert_id", "srv_ip", "vlan_id"]).filter(
@@ -365,11 +360,7 @@ by_srv_ip = by_srv_ip.apply(lambda x: statsFromSeries(x,GRP_SRV))
 print("\nSERVER IP GROUPING\n-------------------------------------\n")
 print("----TOP X-SCORE")
 # print(by_srv_ip.sort_values("srv_port_S",ascending=False).loc[by_srv_ip["alert_name"] != "blacklisted"].head(10))
-print(by_srv_ip.sort_values("srv_port_S",ascending=False).head(10))
-
-# x_avg = by_srv_ip["X-Score"].mean()
-# print("----LOWER SCORE - HIGHER SIZE")
-# print(by_srv_ip.sort_values("size",ascending=False).loc[by_srv_ip["X-Score"]<x_avg].head(10))
+print(by_srv_ip.sort_values("cli_ip_blk",ascending=False).head(10))
 
 
 tmp = by_cli_ip = df.groupby(["alert_id", "cli_ip", "vlan_id"]).filter(
@@ -378,13 +369,23 @@ by_cli_ip = by_cli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
 print("\nCLIENT IP GROUPING\n-------------------------------------\n")
 print("----TOP X-SCORE")
 # print(by_cli_ip.sort_values("cli_port_S",ascending=True).query("alert_id not in [1,38]").head(10))
-print(by_cli_ip.sort_values("cli_port_S",ascending=True).head(10))
+print(by_cli_ip.sort_values("srv_ip_blk",ascending=True).head(10))
 # print(tmp.get_group((38,"172.28.5.38",2))[["srv_ip","cli_ip"]])
 
-# x_avg = by_cli_ip["X-Score"].mean()
-# print("----LOWER SCORE - HIGHER SIZE")
-# print(by_cli_ip.sort_values("size",ascending=False).loc[by_cli_ip["X-Score"]<x_avg].head(10))
-
-
 # TODO Get IPs that generate many alert types
-# print(by_srv_ip.index.to_frame(index=False).groupby(["vlan_id","srv_ip"]).count())
+by_srv_count_alert = by_srv_ip.index.to_frame(index=False).groupby(["vlan_id","srv_ip"]).apply(lambda x: len(x)).to_frame("n_alert_types")
+by_cli_count_alert = by_cli_ip.index.to_frame(index=False).groupby(["vlan_id","cli_ip"]).apply(lambda x: len(x)).to_frame("n_alert_types")
+by_srvcli_count_alert = by_srvcli_ip.index.to_frame(index=False).groupby(["vlan_id","srv_ip","cli_ip"]).apply(lambda x: len(x)).to_frame("n_alert_types")
+
+by_srv_count_alert_mean = by_srv_count_alert["n_alert_types"].mean()
+by_cli_count_alert_mean = by_cli_count_alert["n_alert_types"].mean()
+by_srvcli_count_alert_mean = by_srvcli_count_alert["n_alert_types"].mean()
+
+print("\nThese srv hosts are associated with more alert types than others")
+print(by_srv_count_alert.loc[by_srv_count_alert["n_alert_types"] > by_srv_count_alert_mean])
+
+print("\nThese cli hosts are associated with more alert types than others")
+print(by_cli_count_alert.loc[by_cli_count_alert["n_alert_types"] > by_cli_count_alert_mean])
+
+print("\nThese <srv,cli> tuples are associated with more alert types than others")
+print(by_srvcli_count_alert.loc[by_srvcli_count_alert["n_alert_types"] > by_srvcli_count_alert_mean])
