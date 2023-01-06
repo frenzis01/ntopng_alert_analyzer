@@ -257,13 +257,14 @@ def statsFromSeries(s: pd.Series,GRP_CRIT: int):
     # Get blacklisted IPs and count how many they are
     d["srv_ip_blk"] = 0
     d["cli_ip_blk"] = 0
+    # TODO validate this
     if (GRP_CRIT == GRP_SRV):
         cli_ip_blk_df = s[["cli_ip", "cli_blacklisted"]].loc[s["cli_blacklisted"] == 1, "cli_ip"]
-        d["cli_ip_blk"] = (cli_ip_blk_df.nunique()/len(cli_ip_blk_df) if len(cli_ip_blk_df) else 0)
+        d["cli_ip_blk"] = (cli_ip_blk_df.nunique()/len(s) if len(s) else 0)
         d["srv_ip_blk"] = s["srv_blacklisted"].iat[0]
-    elif (GRP_CRIT == GRP_SRVCLI):
+    elif (GRP_CRIT == GRP_CLI):
         srv_ip_blk_df = s[["srv_ip", "srv_blacklisted"]].loc[s["srv_blacklisted"] == 1, "srv_ip"]
-        d["srv_ip_blk"] = (srv_ip_blk_df.nunique()/len(srv_ip_blk_df) if len(srv_ip_blk_df) else 0)
+        d["srv_ip_blk"] = (srv_ip_blk_df.nunique()/len(s) if len(s) else 0)
         d["cli_ip_blk"] = s["cli_blacklisted"].iat[0]
     # Periodicity - AKA Time interval Coefficient of Variation (CV)
     # TODO histogram rita-like
@@ -301,7 +302,7 @@ def statsFromSeries(s: pd.Series,GRP_CRIT: int):
         # multi-target groups, i.e. high IP entropy => Higher score
         ((d["srv_ip_S"])* 10) +
         ((d["cli_ip_S"])*10) +
-        # Inverse of common srv/cli behaviour, i.e. HIGH srv_port_S || LOW cli_port_S
+        # Inverse of common srv/cli behavior, i.e. HIGH srv_port_S || LOW cli_port_S
         #   => Higher score 
         (d["srv_port_S"])*10 +
         (1 - d["cli_port_S"])*10 +
@@ -321,8 +322,54 @@ def statsFromSeries(s: pd.Series,GRP_CRIT: int):
     return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "noUA_perc", "size","bft_same_file"])
 
 
+#TODO validate
+def summarize(d,GRP_CRIT: int):
+    if GRP_CRIT not in range(3):
+        raise Exception("Invalid grouping criteria")
+    # print("lambda obj: " + str(d))
+    i = ""
+    # "Are the alerts periodic?"
+    TDIFF_CV_TH = 2 # Threshold
+    if d["tdiff_CV"] <= TDIFF_CV_TH:
+        i += "Periodic "+ str(round(d["tdiff_CV"],2)) + " -> "+ str(d["tdiff_avg"]) + "\n"
+    # In the client-server paradigm, the common behavior is that
+    # srv uses always the same known port, while clients use ephimeral ones
+    # We can set an entropy threshold to determine when srv and clients are
+    # behaving oddly
+
+    # not client-server paradigm associated alerts
+    excludes = ["blacklisted"]
+    PORT_S_TH = 0.25
+    if GRP_CRIT != GRP_CLI and d["alert_name"] not in excludes and d["srv_port_S"] >= PORT_S_TH:
+        i += "Odd Server behavior -> Using too many ports\n"
+    if GRP_CRIT != GRP_SRV and d["alert_name"] not in excludes and d["cli_port_S"] <= PORT_S_TH:
+        i += "Odd Client behavior -> Using very few ports\n"
+    
+    # Percentage of blacklisted hosts
+    BLK_PERC_TH = 0.25
+    if d["alert_name"] != "blacklisted":
+        if d["srv_ip_blk"] >= BLK_PERC_TH:
+            i += "Blacklisted servers found\n"
+        if d["cli_ip_blk"] >= BLK_PERC_TH:
+            i += "Blacklisted clients found\n"
+    
+
+    # Percentage of missing User-Agent in BFT alerts
+    NO_UA_PERC_TH = 0.75
+    if d["alert_name"] == "binary_file_transfer":
+        if d["noUA_perc"] > NO_UA_PERC_TH:
+            i += "BFT -> Many User-Agent are missing\n"
+        if d["bft_same_file"] != "":
+            i += "BFT -> Transferring always: \""+d["bft_same_file"]+"\"\n"
+
+    # Prepend group size if critical
+    if i != "":
+        i = "SIZE: " + str(d["size"]) + " |     " + i
+    return i[:-1]
+
 pd.set_option("display.precision", 3)
 pd.set_option("display.max_rows",None)
+pd.set_option('display.max_colwidth', None)
 
 
 # TODO make the grouping parametric
@@ -381,6 +428,7 @@ by_srv_count_alert_mean = by_srv_count_alert["n_alert_types"].mean()
 by_cli_count_alert_mean = by_cli_count_alert["n_alert_types"].mean()
 by_srvcli_count_alert_mean = by_srvcli_count_alert["n_alert_types"].mean()
 
+print("\n#ALERT_TYPES GENERATED\n-------------------------------------\n")
 print("\nThese srv hosts are associated with more alert types than others")
 print(by_srv_count_alert.loc[by_srv_count_alert["n_alert_types"] > by_srv_count_alert_mean])
 
@@ -389,3 +437,20 @@ print(by_cli_count_alert.loc[by_cli_count_alert["n_alert_types"] > by_cli_count_
 
 print("\nThese <srv,cli> tuples are associated with more alert types than others")
 print(by_srvcli_count_alert.loc[by_srvcli_count_alert["n_alert_types"] > by_srvcli_count_alert_mean])
+
+
+print("\nCRITICAL INFO\n-------------------------------------\n")
+print("----SERVER")
+tmp = by_srv_ip.apply(lambda x: summarize(x,GRP_SRV),axis=1).to_frame("critical_info")
+tmp = tmp["critical_info"].loc[tmp["critical_info"] != ""]
+print(tmp.str.split("\n", expand=True).stack())
+
+print("----CLIENT")
+tmp = by_cli_ip.apply(lambda x: summarize(x,GRP_CLI),axis=1).to_frame("critical_info")
+tmp = tmp["critical_info"].loc[tmp["critical_info"] != ""]
+print(tmp.str.split("\n", expand=True).stack())
+
+print("----SERVER-CLIENT")
+tmp = by_srvcli_ip.apply(lambda x: summarize(x,GRP_SRVCLI),axis=1).to_frame("critical_info")
+tmp = tmp["critical_info"].loc[tmp["critical_info"] != ""]
+print(tmp.str.split("\n", expand=True).stack())
