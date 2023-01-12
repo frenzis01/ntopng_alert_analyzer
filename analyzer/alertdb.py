@@ -1,11 +1,42 @@
 import pandas as pd
+import json
 
-df = pd.DataFrame(columns=["tstamp","tstamp_end","srv_port","severity","cli2srv_bytes","vlan_id","rowid","community_id","ip_version","srv2cli_pkts","interface_id","cli2srv_pkts","score","srv2cli_bytes","cli_port","alert_id","l7_proto","srv_blacklisted","cli_blacklisted","json","probe_ip","cli_ip","srv_name","srv_ip","cli_name"])
+import pandas as pd
+import math
+from scipy.stats import entropy
+from collections import Counter
+import struct
+import socket
+
+# srv = pd.DataFrame(columns=["tstamp","tstamp_end","srv_port","severity","cli2srv_bytes","vlan_id","rowid","community_id","ip_version","srv2cli_pkts","interface_id","cli2srv_pkts","score","srv2cli_bytes","cli_port","alert_id","l7_proto","srv_blacklisted","cli_blacklisted","json","probe_ip","cli_ip","srv_name","srv_ip","cli_name"])
+# cli = pd.DataFrame(columns=["tstamp","tstamp_end","srv_port","severity","cli2srv_bytes","vlan_id","rowid","community_id","ip_version","srv2cli_pkts","interface_id","cli2srv_pkts","score","srv2cli_bytes","cli_port","alert_id","l7_proto","srv_blacklisted","cli_blacklisted","json","probe_ip","cli_ip","srv_name","srv_ip","cli_name"])
+# srvcli = pd.DataFrame(columns=["tstamp","tstamp_end","srv_port","severity","cli2srv_bytes","vlan_id","rowid","community_id","ip_version","srv2cli_pkts","interface_id","cli2srv_pkts","score","srv2cli_bytes","cli_port","alert_id","l7_proto","srv_blacklisted","cli_blacklisted","json","probe_ip","cli_ip","srv_name","srv_ip","cli_name"])
+srv = 0
+cli = 0
+srvcli = 0
+
+# srv.set_index("srv_ip")
+# cli.set_index("cli_ip")
+# srvcli.set_index(["srv_ip","cli_ip"])
+
+
+
 
 def new_alert(a):
     remove_unwanted_fields(a)
     a_convert_dtypes(a)
-    df.loc[len(df)] = a
+    # srv.loc[len(srv)] = a
+    tmp = pd.DataFrame(a,index=[a["srv_ip"]])
+    # srv.set_index("srv_ip")
+    global srv
+    if isinstance(srv,int) :
+        srv = tmp
+    else:
+        srv = pd.concat([srv,tmp], axis=0, copy=False, join="inner")
+    # print(srv)
+
+def get_srv():
+    return srv
 
 def a_convert_dtypes(a):
     # convert dtypes
@@ -67,3 +98,145 @@ def remove_unwanted_fields(a):
     a.pop("is_srv_attacker", None)
     a.pop("is_cli_victim", None)
     a.pop("is_cli_attacker", None)
+
+
+# Stats calculation
+
+# sort on tstamp
+# srv = srv.sort_values(by=["tstamp"])
+# print("\tSorted alerts")
+
+
+def is_UA_missing(x):
+    y = json.loads(x)
+    try:
+        o = y["alert_generation"]["flow_risk_info"]
+        o = json.loads(o)
+        o = o["11"]  # useless assignment, needed to trigger KeyError if "11" missing
+        return 1
+    except KeyError:
+        return 0
+    # TODO remove
+    if x.find("Empty or missing User-Agent") != -1:
+        return 1
+    return 0
+
+
+def get_alert_name(x):
+    o = json.loads(x)
+    try:
+        return o["alert_generation"]["script_key"]
+    except KeyError:
+        return "no_name"
+
+def getBFTfilename(x):
+    o = json.loads(x)
+    try :
+        return o["last_url"]
+    except KeyError:
+        return math.nan
+
+def shannon_entropy(data):
+    # Calculate the frequency of each element in the list
+    frequency_dict = Counter(data)
+    S_entropy = 0
+    probabilities = [] # 
+    # Calculate the entropy
+    for key in frequency_dict:
+        # Calculate the relative frequency of each element
+        # and the related probability
+        probabilities.append(frequency_dict[key] / len(data))
+
+    # Use l as the log base, to normalize the result and
+    # get a value between 0 and 1
+    l = len(frequency_dict)
+    S_entropy = 0 if l == 1 else entropy(probabilities,base=l)
+    return S_entropy
+
+def ip2int(x):
+    return struct.unpack("!I", socket.inet_aton(x))[0]
+
+
+GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
+def stats_from_series(s: pd.Series,GRP_CRIT: int):
+    if GRP_CRIT not in range(3):
+        raise Exception("Invalid grouping criteria")
+    s_size = len(s)
+    d = {}
+    d["alert_name"] = s["json"].head(1).apply(get_alert_name).iat[0]
+    # Convert IP to int first, then compute entropy
+    srv_ip_toN = s["srv_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
+    cli_ip_toN = s["cli_ip"].map(lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
+    # Entropy (S)
+    # Note that entropy is normalized and ranges from 0 to 1
+    d["srv_ip_S"] = shannon_entropy(srv_ip_toN) 
+    d["cli_ip_S"] = shannon_entropy(cli_ip_toN) 
+    d["srv_port_S"] = shannon_entropy(s["srv_port"])
+    d["cli_port_S"] = shannon_entropy(s["cli_port"])
+    # Get blacklisted IPs and count how many they are
+    d["srv_ip_blk"] = 0
+    d["cli_ip_blk"] = 0
+    # TODO validate this
+    if (GRP_CRIT == GRP_SRV):
+        cli_ip_blk_df = s[["cli_ip", "cli_blacklisted"]].loc[s["cli_blacklisted"] == 1, "cli_ip"]
+        d["cli_ip_blk"] = (cli_ip_blk_df.nunique()/len(s) if len(s) else 0)
+        d["srv_ip_blk"] = s["srv_blacklisted"].iat[0]
+    elif (GRP_CRIT == GRP_CLI):
+        srv_ip_blk_df = s[["srv_ip", "srv_blacklisted"]].loc[s["srv_blacklisted"] == 1, "srv_ip"]
+        d["srv_ip_blk"] = (srv_ip_blk_df.nunique()/len(s) if len(s) else 0)
+        d["cli_ip_blk"] = s["cli_blacklisted"].iat[0]
+    # Periodicity - AKA Time interval Coefficient of Variation (CV)
+    # TODO histogram rita-like
+    tdiff_avg_unrounded = s["tstamp"].diff().mean()
+    d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
+    # If the avg period is close to 0... 
+    if d["tdiff_avg"].total_seconds() == 0: # cannot divide by 0
+        tdiff_avg_unrounded = pd.Timedelta(1,"s") #1.0 #... consider '1' as reference to compute CV
+    # Compute CV as stddev/avg
+    d["tdiff_CV"] = s["tstamp"].std()/tdiff_avg_unrounded
+    # NTOPNG score average
+    d["score_avg"] = s["score"].mean()
+    # Missing User-Agent percentage (0<p<1 format)
+    d["noUA_perc"] = s["json"].apply(is_UA_missing).sum() / s_size
+    d["size"] = s_size
+    # BinaryFileTransfer -> Check if same file
+    #  Note: nunique() doesn't count NaN values
+    d["bft_same_file"] = ""
+    if (s["alert_id"].iat[0] == 29):
+        filenames = s["json"].apply(getBFTfilename)
+        # print(filenames)
+        # print(filenames.nunique())
+        d["bft_same_file"] = filenames.iat[0] if (filenames.nunique() == 1) else ""
+        # if d["bft_same_file"] != "":
+        #     print(d["bft_same_file"])
+        #     print(s["json"].iat[0])
+
+    # X-SCORE CALCULATION
+    # TODO change (ip/port) weights depending on alert_id
+    # TODO cli2srv and srv2cli bytes
+    # TODO hostpool?
+    # TODO other json fields i.e. file name 
+    d["X-Score"] = (
+        math.log(s_size) +  # Higher size => higher score
+        # multi-target groups, i.e. high IP entropy => Higher score
+        ((d["srv_ip_S"])* 10) +
+        ((d["cli_ip_S"])*10) +
+        # Inverse of common srv/cli behavior, i.e. HIGH srv_port_S || LOW cli_port_S
+        #   => Higher score 
+        (d["srv_port_S"])*10 +
+        (1 - d["cli_port_S"])*10 +
+        # Extra points if communicating with blacklisted IPs
+        d["srv_ip_blk"]* (20 if s["alert_id"].iat[0] != 1 else 5) + # if alert isn't of type "blacklisted"
+        d["cli_ip_blk"]* (20 if s["alert_id"].iat[0] != 1 else 5) + # if alert isn't of type "blacklisted"
+        # Periodicity score = e^(-CV)
+         # lower tdiff_CV => High time periodicity 
+        pow(math.e, (-1.0)*d["tdiff_CV"]) +
+        # ntopng avg score
+        math.log2(d["score_avg"]) * 2 + # 70 -> ~12.4  | 300 -> ~16.5
+        # percentage of missing user agent
+        d["noUA_perc"]*20 +# relevant only when BFT or HTTPsusUA
+        # Is the transferred file always the same?
+        (1 if (d["bft_same_file"] != "") else 0) * 15
+        )
+    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "noUA_perc", "size","bft_same_file"])
+

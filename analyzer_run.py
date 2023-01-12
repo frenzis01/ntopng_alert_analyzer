@@ -114,5 +114,6 @@ from analyzer.handler import *
 for a in raw_alerts:
     alert_handler(a)
 
-print(df)
-print(df.dtypes)
+k = get_srv()
+print(k)
+print(k.dtypes)
