@@ -1,80 +1,10 @@
 import pandas as pd
 
-df = pd.DataFrame({"tstamp": pd.Series(dtype='datetime64[ns]'),
-                   "tstamp_end": pd.Series(dtype='datetime64[ns]'),
-
-                   "srv_port": pd.Series(dtype='int'),
-                   "severity": pd.Series(dtype='int'),
-                   "cli2srv_bytes": pd.Series(dtype='int'),
-                   "vlan_id": pd.Series(dtype='int'),
-                   "rowid": pd.Series(dtype='int'),
-                   "community_id": pd.Series(dtype='int'),
-                   "ip_version": pd.Series(dtype='int'),
-                   "srv2cli_pkts": pd.Series(dtype='int'),
-                   "interface_id": pd.Series(dtype='int'),
-                   "cli2srv_pkts": pd.Series(dtype='int'),
-                   "score": pd.Series(dtype='int'),
-                   "srv2cli_bytes": pd.Series(dtype='int'),
-                   "cli_port": pd.Series(dtype='int'),
-                   "alert_id": pd.Series(dtype='int'),
-                   "l7_proto": pd.Series(dtype='int'),
-
-                  # These are bool actually
-                   "srv_blacklisted": pd.Series(dtype='int'),
-                   "cli_blacklisted": pd.Series(dtype='int'),
-
-                   "probe_ip": pd.Series(dtype='string'),
-                   "cli_ip": pd.Series(dtype='string'),
-                   "srv_name": pd.Series(dtype='string'),
-                   "srv_ip": pd.Series(dtype='string'),
-                   "cli_name": pd.Series(dtype='string'),
-
-                   "json": pd.Series(dtype='object')
-                   })
-
-
-
-dtypes = [
-    ("srv_port",             "int"),
-    ("tstamp_end",           "datetime64[s]"),
-    ("probe_ip",             "string"),
-    ("severity",             "int"),
-    ("cli2srv_bytes",        "int"),
-    ("is_srv_victim",        "bool"),
-    ("cli_ip",               "string"),
-    ("vlan_id",              "int"),
-    ("cli_host_pool_id",     "int"),
-    ("srv_host_pool_id",     "int"),
-    ("rowid",                "int"),
-    ("tstamp",               "datetime64[ns]"),
-    ("community_id",         "int"),
-    ("ip_version",           "int"),
-    ("srv2cli_pkts",         "int"),
-    ("srv_name",             "string"),
-    ("srv_blacklisted",      "int"),
-    ("interface_id",         "int"),
-    ("cli_blacklisted",      "int"),
-    ("is_srv_attacker",      "bool"),
-    ("is_cli_victim",        "bool"),
-    ("srv_ip",               "string"),
-    ("is_cli_attacker",      "bool"),
-    ("cli2srv_pkts",         "int"),
-    ("score",                "int"),
-    ("cli_name",             "string"),
-    ("srv2cli_bytes",        "int"),
-    ("cli_port",             "int"),
-    ("alert_id",             "int"),
-    ("l7_proto",             "int"),
-    ("user_label_tstamp",    "datetime64[ns]"),
-]
-
 df = pd.DataFrame(columns=["tstamp","tstamp_end","srv_port","severity","cli2srv_bytes","vlan_id","rowid","community_id","ip_version","srv2cli_pkts","interface_id","cli2srv_pkts","score","srv2cli_bytes","cli_port","alert_id","l7_proto","srv_blacklisted","cli_blacklisted","json","probe_ip","cli_ip","srv_name","srv_ip","cli_name"])
 
 def new_alert(a):
     remove_unwanted_fields(a)
     a_convert_dtypes(a)
-    # tmp = pd.DataFrame(a, index=[0])
-    # append to dataframe
     df.loc[len(df)] = a
 
 def a_convert_dtypes(a):
@@ -104,6 +34,7 @@ def a_convert_dtypes(a):
     a["srv_blacklisted"] = pd.to_numeric(a["srv_blacklisted"])
     a["cli_blacklisted"] = pd.to_numeric(a["cli_blacklisted"])
     
+    # TODO strings are still recognised as 'object'
     # a["probe_ip"] = str(a["probe_ip"])
     # a["cli_ip"] = str(a["cli_ip"])
     # a["srv_name"] = str(a["srv_name"])
