@@ -8,32 +8,20 @@ from collections import Counter
 import struct
 import socket
 
-# srv = pd.DataFrame(columns=["tstamp","tstamp_end","srv_port","severity","cli2srv_bytes","vlan_id","rowid","community_id","ip_version","srv2cli_pkts","interface_id","cli2srv_pkts","score","srv2cli_bytes","cli_port","alert_id","l7_proto","srv_blacklisted","cli_blacklisted","json","probe_ip","cli_ip","srv_name","srv_ip","cli_name"])
-# cli = pd.DataFrame(columns=["tstamp","tstamp_end","srv_port","severity","cli2srv_bytes","vlan_id","rowid","community_id","ip_version","srv2cli_pkts","interface_id","cli2srv_pkts","score","srv2cli_bytes","cli_port","alert_id","l7_proto","srv_blacklisted","cli_blacklisted","json","probe_ip","cli_ip","srv_name","srv_ip","cli_name"])
-# srvcli = pd.DataFrame(columns=["tstamp","tstamp_end","srv_port","severity","cli2srv_bytes","vlan_id","rowid","community_id","ip_version","srv2cli_pkts","interface_id","cli2srv_pkts","score","srv2cli_bytes","cli_port","alert_id","l7_proto","srv_blacklisted","cli_blacklisted","json","probe_ip","cli_ip","srv_name","srv_ip","cli_name"])
 srv = 0
 cli = 0
 srvcli = 0
-
-# srv.set_index("srv_ip")
-# cli.set_index("cli_ip")
-# srvcli.set_index(["srv_ip","cli_ip"])
-
-
 
 
 def new_alert(a):
     remove_unwanted_fields(a)
     a_convert_dtypes(a)
-    # srv.loc[len(srv)] = a
     tmp = pd.DataFrame(a,index=[a["srv_ip"]])
-    # srv.set_index("srv_ip")
     global srv
     if isinstance(srv,int) :
         srv = tmp
     else:
         srv = pd.concat([srv,tmp], axis=0, copy=False, join="inner")
-    # print(srv)
 
 def get_srv():
     return srv
