@@ -115,3 +115,4 @@ for a in raw_alerts:
     alert_handler(a)
 
 print(df)
+print(df.dtypes)

@@ -456,3 +456,5 @@ print("----SERVER-CLIENT")
 tmp = by_srvcli_ip.apply(lambda x: summarize(x,GRP_SRVCLI),axis=1).to_frame("critical_info")
 tmp = tmp["critical_info"].loc[tmp["critical_info"] != ""]
 print(tmp.str.split("\n", expand=True).stack())
+
+print(df.dtypes)
