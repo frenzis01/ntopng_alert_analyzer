@@ -153,7 +153,7 @@ try:
     print("\tSending request")
     my_historical = Historical(my_ntopng)
     last15minutes = (datetime.datetime.now() -
-                     datetime.timedelta(minutes=30)).strftime('%s')
+                     datetime.timedelta(minutes=120)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
         '%s'), "*", "severity = 5", 50000, "", "")
     # f = open("response.json", "w")
@@ -374,6 +374,8 @@ pd.set_option('display.max_colwidth', None)
 
 # TODO make the grouping parametric
 
+df = df[~df["alert_id"].isin([38,42,1])]
+
 # the return obj of .filter() is DataFrame, not DataFrameGroupBy, so we need to group again
 # btw, this is odd, there should be a less "dumb" way of keeping the data grouped
 MIN_RELEVANT_GRP_SIZE = 5
@@ -388,10 +390,10 @@ by_srvcli_ip = by_srvcli_ip.apply(lambda x: statsFromSeries(x,GRP_CLI))
 # A:B
 # A:C
 # A:D
-df = df.merge(by_srvcli_ip, on=["alert_id", "srv_ip",
-         "cli_ip", "vlan_id"], how='outer', indicator=True)\
-    .query('_merge=="left_only"')\
-    .drop('_merge', axis=1)
+# df = df.merge(by_srvcli_ip, on=["alert_id", "srv_ip",
+#          "cli_ip", "vlan_id"], how='outer', indicator=True)\
+#     .query('_merge=="left_only"')\
+#     .drop('_merge', axis=1)
 
 
 
@@ -424,9 +426,9 @@ by_srv_count_alert = by_srv_ip.index.to_frame(index=False).groupby(["vlan_id","s
 by_cli_count_alert = by_cli_ip.index.to_frame(index=False).groupby(["vlan_id","cli_ip"]).apply(lambda x: len(x)).to_frame("n_alert_types")
 by_srvcli_count_alert = by_srvcli_ip.index.to_frame(index=False).groupby(["vlan_id","srv_ip","cli_ip"]).apply(lambda x: len(x)).to_frame("n_alert_types")
 
-by_srv_count_alert_mean = by_srv_count_alert["n_alert_types"].mean()
-by_cli_count_alert_mean = by_cli_count_alert["n_alert_types"].mean()
-by_srvcli_count_alert_mean = by_srvcli_count_alert["n_alert_types"].mean()
+by_srv_count_alert_mean = by_srv_count_alert["n_alert_types"].loc[by_srv_count_alert["n_alert_types"] > 1].mean()
+by_cli_count_alert_mean = by_cli_count_alert["n_alert_types"].loc[by_cli_count_alert["n_alert_types"] > 1].mean()
+by_srvcli_count_alert_mean = by_srvcli_count_alert["n_alert_types"].loc[by_srvcli_count_alert["n_alert_types"] > 1].mean()
 
 print("\n#ALERT_TYPES GENERATED\n-------------------------------------\n")
 print("\nThese srv hosts are associated with more alert types than others")
