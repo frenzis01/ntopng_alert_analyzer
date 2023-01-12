@@ -96,58 +96,6 @@ except ValueError as e:
     print(e)
     os._exit(-1)
 
-# currently unused
-dtypes = {
-    "srv_port":             "int",
-    "tstamp_end":           "datetime64[s]",
-    "probe_ip":             "string",
-    "severity":             "int",
-    "info":                 "object",
-    "cli2srv_bytes":        "int",
-    "l7_cat":               "object",
-    "is_srv_victim":        "bool",
-    "cli_ip":               "string",
-    "vlan_id":              "int",
-    "cli_host_pool_id":     "int",
-    "srv_host_pool_id":     "int",
-    "rowid":                "int",
-    "tstamp":               "datetime64[ns]",
-    "community_id":         "int",
-    "input_snmp":           "object",
-    "l7_master_proto":      "object",
-    "srv_network":          "object",
-    "flow_risk_bitmap":     "object",
-    "user_label":           "object",
-    "proto":                "object",
-    "ip_version":           "int",
-    "srv2cli_pkts":         "int",
-    "srv_name":             "string",
-    "alerts_map":           "object",
-    "srv_location":         "object",
-    "json":                 "object",
-    "cli_location":         "object",
-    "srv_blacklisted":      "int",
-    "interface_id":         "int",
-    "cli_blacklisted":      "int",
-    "is_srv_attacker":      "bool",
-    "is_cli_victim":        "bool",
-    "srv_ip":               "string",
-    "is_cli_attacker":      "bool",
-    "cli2srv_pkts":         "int",
-    "output_snmp":          "object",
-    "cli_network":          "object",
-    "score":                "int",
-    "cli_name":             "string",
-    "srv2cli_bytes":        "int",
-    "cli_port":             "int",
-    "alert_id":             "int",
-    "l7_proto":             "int",
-    "cli_country":          "object",
-    "srv_country":          "object",
-    "user_label_tstamp":    "datetime64[ns]",
-    "first_seen":           "object",
-    "alert_status":         "object"
-}
 try:
 
     print("\tSending request")
@@ -156,11 +104,6 @@ try:
                      datetime.timedelta(minutes=10)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
         '%s'), "*", "severity = 5", 10, "", "")
-    # f = open("response.json", "w")
-    # f.write(str(raw_alerts))
-    # f.close()
-    # TODO remove response writing
-    # TODO change maxhits
 except ValueError as e:
     print(e)
     os._exit(-1)

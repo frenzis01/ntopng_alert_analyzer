@@ -2,14 +2,11 @@ import pandas as pd
 
 df = pd.DataFrame({"tstamp": pd.Series(dtype='datetime64[ns]'),
                    "tstamp_end": pd.Series(dtype='datetime64[ns]'),
-                   "user_label_tstamp": pd.Series(dtype='datetime64[ns]'),
 
                    "srv_port": pd.Series(dtype='int'),
                    "severity": pd.Series(dtype='int'),
                    "cli2srv_bytes": pd.Series(dtype='int'),
                    "vlan_id": pd.Series(dtype='int'),
-                   "cli_host_pool_id": pd.Series(dtype='int'),
-                   "srv_host_pool_id": pd.Series(dtype='int'),
                    "rowid": pd.Series(dtype='int'),
                    "community_id": pd.Series(dtype='int'),
                    "ip_version": pd.Series(dtype='int'),
@@ -23,12 +20,8 @@ df = pd.DataFrame({"tstamp": pd.Series(dtype='datetime64[ns]'),
                    "l7_proto": pd.Series(dtype='int'),
 
                   # These are bool actually
-                   "is_srv_victim": pd.Series(dtype='int'),
                    "srv_blacklisted": pd.Series(dtype='int'),
                    "cli_blacklisted": pd.Series(dtype='int'),
-                   "is_srv_attacker": pd.Series(dtype='int'),
-                   "is_cli_victim": pd.Series(dtype='int'),
-                   "is_cli_attacker": pd.Series(dtype='int'),
 
                    "probe_ip": pd.Series(dtype='string'),
                    "cli_ip": pd.Series(dtype='string'),
@@ -41,14 +34,9 @@ df = pd.DataFrame({"tstamp": pd.Series(dtype='datetime64[ns]'),
 
 
 def new_alert(a):
-    #  a_convert_dtypes(a)
     remove_unwanted_fields(a)
-    # tmp = pd.DataFrame(a, index=[0])
-    #  df.append(a,ignore_index=True)
-    #  pd.concat([tmp,df],ignore_index=True)
+    # append to dataframe
     df.loc[len(df)] = a
-    #  print(df)
-
 
 def a_convert_dtypes(a):
     # convert dtypes
@@ -59,7 +47,7 @@ def a_convert_dtypes(a):
     print(str(tmp) + str(type(tmp)) + ' --> ' +
           str(a["tstamp"]) + str(type(a["tstamp"])))
 
-def remove_unwanted_fields(a): 
+def remove_unwanted_fields(a):
     a.pop("info", None)
     a.pop("l7_cat", None)
     a.pop("input_snmp", None)
@@ -77,3 +65,11 @@ def remove_unwanted_fields(a):
     a.pop("srv_country", None)
     a.pop("first_seen", None)
     a.pop("alert_status", None)
+
+    a.pop("user_label_tstamp", None)
+    a.pop("cli_host_pool_id", None)
+    a.pop("srv_host_pool_id", None)
+    a.pop("is_srv_victim", None)
+    a.pop("is_srv_attacker", None)
+    a.pop("is_cli_victim", None)
+    a.pop("is_cli_attacker", None)
