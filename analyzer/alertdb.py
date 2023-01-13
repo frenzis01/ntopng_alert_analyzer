@@ -21,23 +21,7 @@ def new_alert(a):
     a_convert_dtypes(a)
 
     # add to buckets (i.e. groups)
-    # global bkts  # use global reference
-    # index_tuples = [[(a["srv_ip"], a["alert_id"])], [(a["cli_ip"], a["alert_id"])], [
-    #     (a["srv_ip"], a["cli_ip"], a["alert_id"])]]
-    # index_names = [("srv_ip", "alert_id"), ("cli_ip", "alert_id"),
-    #                ("srv_ip", "cli_ip", "alert_id")]
-    # for i in range(0, len(bkts)-1):
-    #     bkt = bkts[i]
-    #     curr_tuple = index_tuples.pop(0)
-    #     curr_name = index_names.pop(0)
-    #     tmp = pd.DataFrame(a, index=pd.MultiIndex.from_tuples(
-    #         curr_tuple, names=curr_name))
-    #     if bkt is None:    # first alert
-    #         bkt = tmp
-    #     else:
-    #         bkt = pd.concat([bkt, tmp], axis=0, copy=False, join="inner")
-    
-    global bkt_srv,bkt_cli,bkt_srvcli
+    global bkt_srv,bkt_cli,bkt_srvcli # use global reference
     bkt_srv = add_to_bucket(a,bkt_srv,[(a["srv_ip"], a["alert_id"])],("srv_ip", "alert_id"))
     bkt_cli = add_to_bucket(a,bkt_cli,[(a["cli_ip"], a["alert_id"])],("cli_ip", "alert_id"))
     bkt_srvcli = add_to_bucket(a,bkt_srvcli,[(a["srv_ip"],a["cli_ip"], a["alert_id"])],("srv_ip","cli_ip", "alert_id"))
@@ -61,7 +45,6 @@ def get_bkt(BKT: int):
         return bkt_cli
     if (BKT == GRP_SRVCLI):
         return bkt_srvcli
-
 
 
 def a_convert_dtypes(a):
