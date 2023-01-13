@@ -8,9 +8,9 @@ from collections import Counter
 import struct
 import socket
 
-bkt_srv = None
-bkt_cli = None
-bkt_srvcli = None
+bkt_srv = {}
+bkt_cli = {}
+bkt_srvcli = {}
 
 GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
 
@@ -22,21 +22,22 @@ def new_alert(a):
 
     # add to buckets (i.e. groups)
     global bkt_srv,bkt_cli,bkt_srvcli # use global reference
-    bkt_srv = add_to_bucket(a,bkt_srv,[(a["srv_ip"], a["alert_id"])],("srv_ip", "alert_id"))
-    bkt_cli = add_to_bucket(a,bkt_cli,[(a["cli_ip"], a["alert_id"])],("cli_ip", "alert_id"))
-    bkt_srvcli = add_to_bucket(a,bkt_srvcli,[(a["srv_ip"],a["cli_ip"], a["alert_id"])],("srv_ip","cli_ip", "alert_id"))
+    bkt_srv = add_to_bucket(a,bkt_srv,(a["srv_ip"], a["vlan_id"], a["alert_id"]))
+    bkt_cli = add_to_bucket(a,bkt_cli,(a["cli_ip"], a["vlan_id"], a["alert_id"]))
+    bkt_srvcli = add_to_bucket(a,bkt_srvcli,(a["srv_ip"],a["cli_ip"], a["vlan_id"], a["alert_id"]))
 
 
-def add_to_bucket(alert, bkt, index_tuple, index_name):
-    tmp = pd.DataFrame(alert, index=pd.MultiIndex.from_tuples(index_tuple, names=index_name))
-    if bkt is None:    # first alert
-        bkt = tmp
-    else:
-        bkt = pd.concat([bkt, tmp], axis=0, copy=False, join="inner")
+def add_to_bucket(alert, bkt, key):
+    try:
+        x = bkt[key] # throws KeyError if not existing
+        bkt[key].append(alert)
+        bkt[key].sort(key=lambda x : x["tstamp"])
+    except KeyError:
+        bkt[key] = [alert]
     return bkt
 
 
-def get_bkt(BKT: int):
+def get_bkt(BKT: int) -> pd.DataFrame:
     if (BKT not in range(3)):
         raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
     if (BKT == GRP_SRV):
@@ -47,11 +48,20 @@ def get_bkt(BKT: int):
         return bkt_srvcli
 
 
+# UTILITIES
 def a_convert_dtypes(a):
+    # TODO remove pandas leftovers
+    
     # convert dtypes
     # tmp = a["tstamp"]
     a["tstamp"] = pd.to_datetime(a["tstamp"])
     a["tstamp_end"] = pd.to_datetime(a["tstamp_end"])
+
+    # format 2023-01-13 17:37:31
+    # a["tstamp"] = datetime.strptime(a["tstamp"], "YYYY-MM-DD HH:MM:SS")
+    # a["tstamp_end"] = datetime.strptime(a["tstamp_end"], "YYYY-MM-DD HH:MM:SS")
+
+    
     # print(str(tmp) + str(type(tmp)) + ' --> ' +
     #   str(a["tstamp"]) + str(type(a["tstamp"])))
 
@@ -60,7 +70,6 @@ def a_convert_dtypes(a):
     a["cli2srv_bytes"] = pd.to_numeric(a["cli2srv_bytes"])
     a["vlan_id"] = pd.to_numeric(a["vlan_id"])
     a["rowid"] = pd.to_numeric(a["rowid"])
-    a["community_id"] = pd.to_numeric(a["community_id"])
     a["ip_version"] = pd.to_numeric(a["ip_version"])
     a["srv2cli_pkts"] = pd.to_numeric(a["srv2cli_pkts"])
     a["interface_id"] = pd.to_numeric(a["interface_id"])
@@ -101,6 +110,7 @@ def remove_unwanted_fields(a):
     a.pop("first_seen", None)
     a.pop("alert_status", None)
 
+    a.pop("community_id", None)
     a.pop("user_label_tstamp", None)
     a.pop("cli_host_pool_id", None)
     a.pop("srv_host_pool_id", None)
@@ -173,37 +183,42 @@ def ip2int(x):
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
 
 
-def stats_from_series(s: pd.Series, GRP_CRIT: int):
+def bkt_stats(s: list, GRP_CRIT: int, key: tuple):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
     s_size = len(s)
     d = {}
-    d["alert_name"] = s["json"].head(1).apply(get_alert_name).iat[0]
+    d["alert_name"] = get_alert_name(s[0]["json"])
+
+
+    # ENTROPY (S)
     # Convert IP to int first, then compute entropy
-    srv_ip_toN = s["srv_ip"].map(
-        lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
-    cli_ip_toN = s["cli_ip"].map(
-        lambda x: struct.unpack("!I", socket.inet_aton(x))[0])
-    # Entropy (S)
+    def ip_to_numeric(x):
+        return struct.unpack("!I", socket.inet_aton(x))[0]
+    srv_ip_toN = map(ip_to_numeric,map(lambda x: x["srv_ip"],s))
+    cli_ip_toN = map(ip_to_numeric,map(lambda x: x["cli_ip"],s))
+    
     # Note that entropy is normalized and ranges from 0 to 1
     d["srv_ip_S"] = shannon_entropy(srv_ip_toN)
     d["cli_ip_S"] = shannon_entropy(cli_ip_toN)
     d["srv_port_S"] = shannon_entropy(s["srv_port"])
     d["cli_port_S"] = shannon_entropy(s["cli_port"])
+
+
     # Get blacklisted IPs and count how many they are
     d["srv_ip_blk"] = 0
     d["cli_ip_blk"] = 0
-    # TODO validate this
     if (GRP_CRIT == GRP_SRV):
-        cli_ip_blk_df = s[["cli_ip", "cli_blacklisted"]
-                          ].loc[s["cli_blacklisted"] == 1, "cli_ip"]
-        d["cli_ip_blk"] = (cli_ip_blk_df.nunique()/len(s) if len(s) else 0)
-        d["srv_ip_blk"] = s["srv_blacklisted"].iat[0]
+        cli_ip_set = set(map(lambda x: (x["cli_ip"],x["cli_blacklisted"])))
+        cli_ip_blk = (filter(lambda x: x[1] == 1, cli_ip_set))
+        d["cli_ip_blk"] = (len(cli_ip_blk)/len(cli_ip_set) if len(cli_ip_set) else 0)
+        d["srv_ip_blk"] = s[0]["srv_blacklisted"]
     elif (GRP_CRIT == GRP_CLI):
-        srv_ip_blk_df = s[["srv_ip", "srv_blacklisted"]
-                          ].loc[s["srv_blacklisted"] == 1, "srv_ip"]
-        d["srv_ip_blk"] = (srv_ip_blk_df.nunique()/len(s) if len(s) else 0)
-        d["cli_ip_blk"] = s["cli_blacklisted"].iat[0]
+        srv_ip_set = set(map(lambda x: (x["srv_ip"],x["srv_blacklisted"])))
+        srv_ip_blk = (filter(lambda x: x[1] == 1, srv_ip_set))
+        d["srv_ip_blk"] = (len(srv_ip_blk)/len(srv_ip_set) if len(srv_ip_set) else 0)
+        d["cli_ip_blk"] = s[0]["cli_blacklisted"]
+
     # Periodicity - AKA Time interval Coefficient of Variation (CV)
     # TODO histogram rita-like
     tdiff_avg_unrounded = s["tstamp"].diff().mean()

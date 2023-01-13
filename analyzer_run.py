@@ -103,7 +103,7 @@ try:
     last15minutes = (datetime.datetime.now() -
                      datetime.timedelta(minutes=10)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
-        '%s'), "*", "severity = 5", 10, "", "")
+        '%s'), "*", "severity = 5", 40, "", "")
 except ValueError as e:
     print(e)
     os._exit(-1)
@@ -116,6 +116,5 @@ for a in raw_alerts:
 
 k = get_bkt(GRP_SRV)
 print(k)
-print(get_bkt(GRP_CLI))
-print(get_bkt(GRP_SRVCLI))
-print(k.dtypes)
+# print(k.filter(lambda g: len(g) > 3),axis=1)
+# print(k.apply(lambda x: stats_from_series(x,GRP_SRV), axis=1))
