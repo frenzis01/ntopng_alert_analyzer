@@ -114,6 +114,8 @@ from analyzer.handler import *
 for a in raw_alerts:
     alert_handler(a)
 
-k = get_srv()
+k = get_bkt(GRP_SRV)
 print(k)
+print(get_bkt(GRP_CLI))
+print(get_bkt(GRP_SRVCLI))
 print(k.dtypes)
