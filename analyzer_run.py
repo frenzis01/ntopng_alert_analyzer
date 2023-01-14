@@ -118,3 +118,4 @@ bsrv = get_bkt(GRP_SRV)
 # k_stats = {k : bkt_stats(v,GRP_SRV) for (k,v) in bsrv.items()}
 # print(json.dumps({str(k) : str(v) for (k,v) in filter(lambda x: x[1],k_stats.items())},indent=2))
 print(get_higher_alert_types(bsrv))
+print(get_cs_paradigm_odd(bsrv,GRP_SRV))

@@ -105,7 +105,7 @@ def remove_unwanted_fields(a):
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
 MIN_BKT_RELEVANT_SIZE = 3
 
-def bkt_stats(s: list, GRP_CRIT: int):
+def get_bkt_stats(s: list, GRP_CRIT: int):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
     if len(s) < MIN_BKT_RELEVANT_SIZE:
@@ -286,3 +286,27 @@ def get_higher_alert_types(bkt: dict):
 
     # return only keys s.t. n_alerts > mean
     return {x: count for x, count in n_alert_types_per_key.items() if count > n_alert_types_mean}
+
+def get_cs_paradigm_odd(bkt: dict, GRP_CRIT:int):
+    if GRP_CRIT not in range(3):
+        raise Exception("Invalid grouping criteria")
+    
+    
+    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    
+    # In the client-server paradigm, the common behavior is that
+    # srv uses always the same known port, while clients use ephimeral ones
+    # We can set an entropy threshold to determine when srv and clients are
+    # behaving oddly
+
+    def is_odd(x):
+        # Note: exclude not client-server paradigm associated alerts
+        excludes = ["blacklisted"]
+        PORT_S_TH = 0.25
+        if GRP_CRIT != GRP_CLI and x["alert_name"] not in excludes and x["srv_port_S"] >= PORT_S_TH:
+            return "odd_server"
+        if GRP_CRIT != GRP_SRV and x["alert_name"] not in excludes and x["cli_port_S"] <= PORT_S_TH:
+            return "odd_client"
+        return None
+    
+    return {k: oddity for (k,v) in bkt_s.items() if (oddity := is_odd(v))}
