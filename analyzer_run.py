@@ -115,6 +115,7 @@ for a in raw_alerts:
     alert_handler(a)
 
 k = get_bkt(GRP_SRV)
-print(k)
+k_stats = {k : bkt_stats(v,GRP_SRV) for (k,v) in k.items()}
+print(k_stats)
 # print(k.filter(lambda g: len(g) > 3),axis=1)
 # print(k.apply(lambda x: stats_from_series(x,GRP_SRV), axis=1))

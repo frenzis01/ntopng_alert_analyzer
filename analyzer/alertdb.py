@@ -7,6 +7,7 @@ from scipy.stats import entropy
 from collections import Counter
 import struct
 import socket
+import numpy as np
 
 bkt_srv = {}
 bkt_cli = {}
@@ -136,10 +137,6 @@ def is_UA_missing(x):
         return 1
     except KeyError:
         return 0
-    # TODO remove
-    if x.find("Empty or missing User-Agent") != -1:
-        return 1
-    return 0
 
 
 def get_alert_name(x):
@@ -150,12 +147,6 @@ def get_alert_name(x):
         return "no_name"
 
 
-def getBFTfilename(x):
-    o = json.loads(x)
-    try:
-        return o["last_url"]
-    except KeyError:
-        return math.nan
 
 
 def shannon_entropy(data):
@@ -181,11 +172,14 @@ def ip2int(x):
 
 
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
+MIN_BKT_RELEVANT_SIZE = 3
 
-
-def bkt_stats(s: list, GRP_CRIT: int, key: tuple):
+def bkt_stats(s: list, GRP_CRIT: int):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
+    if len(s) < MIN_BKT_RELEVANT_SIZE:
+        return "Insufficient size"
+    # print(s)
     s_size = len(s)
     d = {}
     d["alert_name"] = get_alert_name(s[0]["json"])
@@ -195,57 +189,77 @@ def bkt_stats(s: list, GRP_CRIT: int, key: tuple):
     # Convert IP to int first, then compute entropy
     def ip_to_numeric(x):
         return struct.unpack("!I", socket.inet_aton(x))[0]
-    srv_ip_toN = map(ip_to_numeric,map(lambda x: x["srv_ip"],s))
-    cli_ip_toN = map(ip_to_numeric,map(lambda x: x["cli_ip"],s))
+    srv_ip_toN = list(map(ip_to_numeric,map(lambda x: x["srv_ip"],s)))
+    cli_ip_toN = list(map(ip_to_numeric,map(lambda x: x["cli_ip"],s)))
     
     # Note that entropy is normalized and ranges from 0 to 1
     d["srv_ip_S"] = shannon_entropy(srv_ip_toN)
     d["cli_ip_S"] = shannon_entropy(cli_ip_toN)
-    d["srv_port_S"] = shannon_entropy(s["srv_port"])
-    d["cli_port_S"] = shannon_entropy(s["cli_port"])
+    d["srv_port_S"] = shannon_entropy(list(map(lambda x: x["srv_port"],s)))
+    d["cli_port_S"] = shannon_entropy(list(map(lambda x: x["cli_port"],s)))
 
 
     # Get blacklisted IPs and count how many they are
     d["srv_ip_blk"] = 0
     d["cli_ip_blk"] = 0
     if (GRP_CRIT == GRP_SRV):
-        cli_ip_set = set(map(lambda x: (x["cli_ip"],x["cli_blacklisted"])))
-        cli_ip_blk = (filter(lambda x: x[1] == 1, cli_ip_set))
+        cli_ip_set = set(map(lambda x: (x["cli_ip"],x["cli_blacklisted"]), s))
+        cli_ip_blk = set(filter(lambda x: x[1] == 1, cli_ip_set))
         d["cli_ip_blk"] = (len(cli_ip_blk)/len(cli_ip_set) if len(cli_ip_set) else 0)
         d["srv_ip_blk"] = s[0]["srv_blacklisted"]
     elif (GRP_CRIT == GRP_CLI):
-        srv_ip_set = set(map(lambda x: (x["srv_ip"],x["srv_blacklisted"])))
-        srv_ip_blk = (filter(lambda x: x[1] == 1, srv_ip_set))
+        srv_ip_set = set(map(lambda x: (x["srv_ip"],x["srv_blacklisted"]), s))
+        srv_ip_blk = set(filter(lambda x: x[1] == 1, srv_ip_set))
         d["srv_ip_blk"] = (len(srv_ip_blk)/len(srv_ip_set) if len(srv_ip_set) else 0)
         d["cli_ip_blk"] = s[0]["cli_blacklisted"]
 
-    # Periodicity - AKA Time interval Coefficient of Variation (CV)
+    # PERIODICITY - AKA Time interval Coefficient of Variation (CV)
+    # assert that 's' is sorted on tstamp
     # TODO histogram rita-like
-    tdiff_avg_unrounded = s["tstamp"].diff().mean()
+    # tdiff_avg_unrounded = s["tstamp"].diff().mean()
+    def avg_delta(l):
+        delta_sum = pd.Timedelta(0,"millis")
+        for i in range(1,len(l)):
+            delta_sum += l[i] - l[i-1]
+        return delta_sum / (len(l) - 1)
+    tstamp_list = list(map(lambda x: x["tstamp"],s))
+    tdiff_avg_unrounded = avg_delta(tstamp_list)
     d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
     # If the avg period is close to 0...
     if d["tdiff_avg"].total_seconds() == 0:  # cannot divide by 0
         # 1.0 #... consider '1' as reference to compute CV
         tdiff_avg_unrounded = pd.Timedelta(1, "s")
     # Compute CV as stddev/avg
-    d["tdiff_CV"] = s["tstamp"].std()/tdiff_avg_unrounded
+    d["tdiff_CV"] = np.std(tstamp_list) / tdiff_avg_unrounded
+    
     # NTOPNG score average
-    d["score_avg"] = s["score"].mean()
+    d["score_avg"] = np.mean(list(map(lambda x: x["score"],s)))
+    
     # Missing User-Agent percentage (0<p<1 format)
-    d["noUA_perc"] = s["json"].apply(is_UA_missing).sum() / s_size
+    # d["noUA_perc"] = s["json"].apply(is_UA_missing).sum() / s_size
+    d["noUA_perc"] = sum(map(is_UA_missing,map(lambda x: x["json"]))) / s_size
     d["size"] = s_size
-    # BinaryFileTransfer -> Check if same file
+    # BinaryAppTransfer -> Check if same file
     #  Note: nunique() doesn't count NaN values
     d["bft_same_file"] = ""
-    if (s["alert_id"].iat[0] == 29):
-        filenames = s["json"].apply(getBFTfilename)
-        # print(filenames)
-        # print(filenames.nunique())
-        d["bft_same_file"] = filenames.iat[0] if (
-            filenames.nunique() == 1) else ""
-        # if d["bft_same_file"] != "":
-        #     print(d["bft_same_file"])
-        #     print(s["json"].iat[0])
+    def get_BAT_path(x):
+        o = json.loads(x)
+        try:
+            return o["last_url"]
+        except KeyError:
+            return ""
+
+    if (s[0]["alert_id"] == 29):
+        # get the first path
+        first_path = get_BAT_path(s[0]["json"])
+        if first_path != "":
+            for p in map(get_BAT_path,map(lambda x: x["json"],s)):
+                if p != first_path:
+                    first_path = ""
+                    break
+            
+
+        d["bft_same_file"] = first_path
 
     # X-SCORE CALCULATION
     # TODO change (ip/port) weights depending on alert_id
@@ -263,9 +277,9 @@ def bkt_stats(s: list, GRP_CRIT: int, key: tuple):
         (1 - d["cli_port_S"])*10 +
         # Extra points if communicating with blacklisted IPs
         # if alert isn't of type "blacklisted"
-        d["srv_ip_blk"] * (20 if s["alert_id"].iat[0] != 1 else 5) +
+        d["srv_ip_blk"] * (20 if s[0]["alert_id"] != 1 else 5) +
         # if alert isn't of type "blacklisted"
-        d["cli_ip_blk"] * (20 if s["alert_id"].iat[0] != 1 else 5) +
+        d["cli_ip_blk"] * (20 if s[0]["alert_id"] != 1 else 5) +
         # Periodicity score = e^(-CV)
         # lower tdiff_CV => High time periodicity
         pow(math.e, (-1.0)*d["tdiff_CV"]) +
@@ -276,4 +290,4 @@ def bkt_stats(s: list, GRP_CRIT: int, key: tuple):
         # Is the transferred file always the same?
         (1 if (d["bft_same_file"] != "") else 0) * 15
     )
-    return pd.Series(d, index=["alert_name", "X-Score", "srv_ip_S", "cli_ip_S", "srv_port_S", "cli_port_S", "cli_ip_blk", "srv_ip_blk", "tdiff_avg", "tdiff_CV", "score_avg", "noUA_perc", "size", "bft_same_file"])
+    return d
