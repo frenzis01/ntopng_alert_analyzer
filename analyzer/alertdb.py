@@ -8,13 +8,13 @@ from collections import Counter
 import struct
 import socket
 import numpy as np
+import datetime as dt
 
 bkt_srv = {}
 bkt_cli = {}
 bkt_srvcli = {}
 
 GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
-
 
 def new_alert(a):
     # fix dtypes and remove unnecessary fields to improve performance
@@ -55,12 +55,12 @@ def a_convert_dtypes(a):
     
     # convert dtypes
     # tmp = a["tstamp"]
-    a["tstamp"] = pd.to_datetime(a["tstamp"])
-    a["tstamp_end"] = pd.to_datetime(a["tstamp_end"])
+    # a["tstamp"] = pd.to_datetime(a["tstamp"])
+    # a["tstamp_end"] = pd.to_datetime(a["tstamp_end"])
 
     # format 2023-01-13 17:37:31
-    # a["tstamp"] = datetime.strptime(a["tstamp"], "YYYY-MM-DD HH:MM:SS")
-    # a["tstamp_end"] = datetime.strptime(a["tstamp_end"], "YYYY-MM-DD HH:MM:SS")
+    a["tstamp"] = dt.datetime.strptime(a["tstamp"], "%Y-%m-%d %H:%M:%S")
+    a["tstamp_end"] = dt.datetime.strptime(a["tstamp_end"], "%Y-%m-%d %H:%M:%S")
 
     
     # print(str(tmp) + str(type(tmp)) + ' --> ' +
@@ -146,9 +146,6 @@ def get_alert_name(x):
     except KeyError:
         return "no_name"
 
-
-
-
 def shannon_entropy(data):
     # Calculate the frequency of each element in the list
     frequency_dict = Counter(data)
@@ -218,26 +215,26 @@ def bkt_stats(s: list, GRP_CRIT: int):
     # TODO histogram rita-like
     # tdiff_avg_unrounded = s["tstamp"].diff().mean()
     def avg_delta(l):
-        delta_sum = pd.Timedelta(0,"millis")
+        delta_sum = dt.timedelta(seconds=0)
         for i in range(1,len(l)):
             delta_sum += l[i] - l[i-1]
         return delta_sum / (len(l) - 1)
     tstamp_list = list(map(lambda x: x["tstamp"],s))
     tdiff_avg_unrounded = avg_delta(tstamp_list)
-    d["tdiff_avg"] = tdiff_avg_unrounded.round("s")
+    d["tdiff_avg"] = dt.timedelta(seconds=round(tdiff_avg_unrounded.total_seconds()))
     # If the avg period is close to 0...
     if d["tdiff_avg"].total_seconds() == 0:  # cannot divide by 0
         # 1.0 #... consider '1' as reference to compute CV
-        tdiff_avg_unrounded = pd.Timedelta(1, "s")
+        tdiff_avg_unrounded = dt.timedelta(seconds=1)
     # Compute CV as stddev/avg
-    d["tdiff_CV"] = np.std(tstamp_list) / tdiff_avg_unrounded
+    d["tdiff_CV"] = np.std(list(map(lambda x: (x - dt.datetime(1970, 1, 1)).total_seconds(),tstamp_list))) / tdiff_avg_unrounded.total_seconds()
     
     # NTOPNG score average
     d["score_avg"] = np.mean(list(map(lambda x: x["score"],s)))
     
     # Missing User-Agent percentage (0<p<1 format)
     # d["noUA_perc"] = s["json"].apply(is_UA_missing).sum() / s_size
-    d["noUA_perc"] = sum(map(is_UA_missing,map(lambda x: x["json"]))) / s_size
+    d["noUA_perc"] = sum(map(is_UA_missing,map(lambda x: x["json"],s))) / s_size
     d["size"] = s_size
     # BinaryAppTransfer -> Check if same file
     #  Note: nunique() doesn't count NaN values
