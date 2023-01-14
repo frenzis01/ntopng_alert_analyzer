@@ -187,7 +187,7 @@ def get_bkt_stats(s: list, GRP_CRIT: int):
         tdiff_avg_unrounded = dt.timedelta(seconds=1)
     # Compute CV as stddev/avg
     d["tdiff_CV"] = np.std(list(map(lambda x: (x - dt.datetime(1970, 1, 1)).total_seconds(),tstamp_list))) / tdiff_avg_unrounded.total_seconds()
-    
+    d["tdiff_avg"] = str(d["tdiff_avg"])
     # NTOPNG score average
     d["score_avg"] = np.mean(list(map(lambda x: x["score"],s)))
     
@@ -287,11 +287,13 @@ def get_higher_alert_types(bkt: dict):
     # return only keys s.t. n_alerts > mean
     return {x: count for x, count in n_alert_types_per_key.items() if count > n_alert_types_mean}
 
+# returns hosts which do not behave according to
+# the client-server paradigm
 def get_cs_paradigm_odd(bkt: dict, GRP_CRIT:int):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
     
-    
+    # TODO it's not this function responsability to compute stats
     bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
     
     # In the client-server paradigm, the common behavior is that
@@ -309,4 +311,43 @@ def get_cs_paradigm_odd(bkt: dict, GRP_CRIT:int):
             return "odd_client"
         return None
     
+    # TODO group on ip,vlan and exclude alert_id from k
+    # currently k = (ip,vlan,alert_id) leading to
+    # (192.168.1.1,42,15) != (192.168.1.1,42,26)
+    # but (ip,vlan) is the same
     return {k: oddity for (k,v) in bkt_s.items() if (oddity := is_odd(v))}
+
+# @returns groups which are strongly periodic (i.e. tdiff_CV < 1.0)
+def get_periodic(bkt: dict):
+    # TODO it's not this function responsability to compute stats
+    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] < 1.0}
+
+def get_similar_periodicity(bkt: dict):
+    # TODO it's not this function responsability to compute stats
+    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    # TODO find a criteria to group similar periodicities
+
+
+def get_bat_samefile(bkt:dict):
+    # TODO it's not this function responsability to compute stats
+    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    return {k: "bat_samefile:" + v["bft_same_file"] for (k,v) in bkt_s.items() if v["bft_same_file"] != ""}
+
+def get_bat_missingUA(bkt:dict):
+    # TODO it's not this function responsability to compute stats
+    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    
+    # Percentage of missing User-Agent in BFT alerts
+    NO_UA_PERC_TH = 0.75
+    return {k: "bat_missingUA" for (k,v) in bkt_s.items() if s["noUA_perc"] > NO_UA_PERC_TH}
+
+def get_blk_peer(bkt:dict,GRP_CRIT:int):
+    if GRP_CRIT not in range(2):
+        raise Exception("Invalid grouping criteria, only GRP_SRV and GRP_CLI available")
+    
+    # TODO it's not this function responsability to compute stats
+    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    BLK_PERC_TH = 0.25
+    if (GRP_CRIT == GRP_SRV)
+    # return {k: "blk_cli_peer" for (k,v) in bkt_s.items() if s["noUA_perc"] > NO_UA_PERC_TH}
