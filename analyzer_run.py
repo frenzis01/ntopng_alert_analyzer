@@ -114,8 +114,8 @@ from analyzer.handler import *
 for a in raw_alerts:
     alert_handler(a)
 
-k = get_bkt(GRP_SRV)
-k_stats = {k : bkt_stats(v,GRP_SRV) for (k,v) in k.items()}
-print(k_stats)
+bsrv = get_bkt(GRP_SRV)
+k_stats = {k : bkt_stats(v,GRP_SRV) for (k,v) in bsrv.items()}
+print(json.dumps({str(k) : str(v) for (k,v) in k_stats.items()},indent=2))
 # print(k.filter(lambda g: len(g) > 3),axis=1)
 # print(k.apply(lambda x: stats_from_series(x,GRP_SRV), axis=1))
