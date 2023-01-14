@@ -1,7 +1,5 @@
-import pandas as pd
 import json
 
-import pandas as pd
 import math
 from scipy.stats import entropy
 from collections import Counter
@@ -38,7 +36,7 @@ def add_to_bucket(alert, bkt, key):
     return bkt
 
 
-def get_bkt(BKT: int) -> pd.DataFrame:
+def get_bkt(BKT: int) -> dict:
     if (BKT not in range(3)):
         raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
     if (BKT == GRP_SRV):
@@ -51,20 +49,10 @@ def get_bkt(BKT: int) -> pd.DataFrame:
 
 # UTILITIES
 def a_convert_dtypes(a):
-    # TODO remove pandas leftovers
-    
-    # convert dtypes
-    # tmp = a["tstamp"]
-    # a["tstamp"] = pd.to_datetime(a["tstamp"])
-    # a["tstamp_end"] = pd.to_datetime(a["tstamp_end"])
 
     # format 2023-01-13 17:37:31
     a["tstamp"] = dt.datetime.strptime(a["tstamp"], "%Y-%m-%d %H:%M:%S")
     a["tstamp_end"] = dt.datetime.strptime(a["tstamp_end"], "%Y-%m-%d %H:%M:%S")
-
-    
-    # print(str(tmp) + str(type(tmp)) + ' --> ' +
-    #   str(a["tstamp"]) + str(type(a["tstamp"])))
 
     a["srv_port"] = int(a["srv_port"])
     a["severity"] = int(a["severity"])
@@ -83,14 +71,6 @@ def a_convert_dtypes(a):
 
     a["srv_blacklisted"] = int(a["srv_blacklisted"])
     a["cli_blacklisted"] = int(a["cli_blacklisted"])
-
-    # TODO strings are still recognised as 'object'
-    # a["probe_ip"] = str(a["probe_ip"])
-    # a["cli_ip"] = str(a["cli_ip"])
-    # a["srv_name"] = str(a["srv_name"])
-    # a["srv_ip"] = str(a["srv_ip"])
-    # a["cli_name"] = str(a["cli_name"])
-
 
 def remove_unwanted_fields(a):
     a.pop("info", None)
@@ -123,51 +103,6 @@ def remove_unwanted_fields(a):
 
 # Stats calculation
 
-# sort on tstamp
-# srv = srv.sort_values(by=["tstamp"])
-# print("\tSorted alerts")
-
-
-def is_UA_missing(x):
-    y = json.loads(x)
-    try:
-        o = y["alert_generation"]["flow_risk_info"]
-        o = json.loads(o)
-        o = o["11"]  # useless assignment, needed to trigger KeyError if "11" missing
-        return 1
-    except KeyError:
-        return 0
-
-
-def get_alert_name(x):
-    o = json.loads(x)
-    try:
-        return o["alert_generation"]["script_key"]
-    except KeyError:
-        return "no_name"
-
-def shannon_entropy(data):
-    # Calculate the frequency of each element in the list
-    frequency_dict = Counter(data)
-    S_entropy = 0
-    probabilities = []
-    # Calculate the entropy
-    for key in frequency_dict:
-        # Calculate the relative frequency of each element
-        # and the related probability
-        probabilities.append(frequency_dict[key] / len(data))
-
-    # Use l as the log base, to normalize the result and
-    # get a value between 0 and 1
-    l = len(frequency_dict)
-    S_entropy = 0 if l == 1 else entropy(probabilities, base=l)
-    return S_entropy
-
-
-def ip2int(x):
-    return struct.unpack("!I", socket.inet_aton(x))[0]
-
-
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
 MIN_BKT_RELEVANT_SIZE = 3
 
@@ -175,7 +110,16 @@ def bkt_stats(s: list, GRP_CRIT: int):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
     if len(s) < MIN_BKT_RELEVANT_SIZE:
-        return "Insufficient size"
+        return None
+
+    # Functions
+    def get_alert_name(x):
+        o = json.loads(x)
+        try:
+            return o["alert_generation"]["script_key"]
+        except KeyError:
+            return "no_name"
+
     # print(s)
     s_size = len(s)
     d = {}
@@ -190,6 +134,22 @@ def bkt_stats(s: list, GRP_CRIT: int):
     cli_ip_toN = list(map(ip_to_numeric,map(lambda x: x["cli_ip"],s)))
     
     # Note that entropy is normalized and ranges from 0 to 1
+    def shannon_entropy(data):
+        # Calculate the frequency of each element in the list
+        frequency_dict = Counter(data)
+        S_entropy = 0
+        probabilities = []
+        # Calculate the entropy
+        for key in frequency_dict:
+            # Calculate the relative frequency of each element
+            # and the related probability
+            probabilities.append(frequency_dict[key] / len(data))
+
+        # Use l as the log base, to normalize the result and
+        # get a value between 0 and 1
+        l = len(frequency_dict)
+        S_entropy = 0 if l == 1 else entropy(probabilities, base=l)
+        return S_entropy
     d["srv_ip_S"] = shannon_entropy(srv_ip_toN)
     d["cli_ip_S"] = shannon_entropy(cli_ip_toN)
     d["srv_port_S"] = shannon_entropy(list(map(lambda x: x["srv_port"],s)))
@@ -213,7 +173,7 @@ def bkt_stats(s: list, GRP_CRIT: int):
     # PERIODICITY - AKA Time interval Coefficient of Variation (CV)
     # assert that 's' is sorted on tstamp
     # TODO histogram rita-like
-    # tdiff_avg_unrounded = s["tstamp"].diff().mean()
+    # TODO optimize update on new alert
     def avg_delta(l):
         delta_sum = dt.timedelta(seconds=0)
         for i in range(1,len(l)):
@@ -232,12 +192,21 @@ def bkt_stats(s: list, GRP_CRIT: int):
     # NTOPNG score average
     d["score_avg"] = np.mean(list(map(lambda x: x["score"],s)))
     
-    # Missing User-Agent percentage (0<p<1 format)
-    # d["noUA_perc"] = s["json"].apply(is_UA_missing).sum() / s_size
+    # MISSING USER-AGENT percentage (0<p<1 format)
+    # TODO optimize update on new alert
+    def is_UA_missing(x):
+        y = json.loads(x)
+        try:
+            o = y["alert_generation"]["flow_risk_info"]
+            o = json.loads(o)
+            o = o["11"]  # useless assignment, needed to trigger KeyError if "11" missing
+            return 1
+        except KeyError:
+            return 0
     d["noUA_perc"] = sum(map(is_UA_missing,map(lambda x: x["json"],s))) / s_size
-    d["size"] = s_size
-    # BinaryAppTransfer -> Check if same file
-    #  Note: nunique() doesn't count NaN values
+    
+    # BAT Binary Application Transfer -> Check if same file
+    # TODO optimize update on new alert
     d["bft_same_file"] = ""
     def get_BAT_path(x):
         o = json.loads(x)
@@ -258,6 +227,8 @@ def bkt_stats(s: list, GRP_CRIT: int):
 
         d["bft_same_file"] = first_path
 
+    d["size"] = s_size
+    
     # X-SCORE CALCULATION
     # TODO change (ip/port) weights depending on alert_id
     # TODO cli2srv and srv2cli bytes
