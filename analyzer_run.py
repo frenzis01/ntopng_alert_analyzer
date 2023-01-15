@@ -101,7 +101,7 @@ try:
     print("\tSending request")
     my_historical = Historical(my_ntopng)
     last15minutes = (datetime.datetime.now() -
-                     datetime.timedelta(minutes=10)).strftime('%s')
+                     datetime.timedelta(minutes=30)).strftime('%s')
     raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
         '%s'), "*", "severity = 5", 10000, "", "")
 except ValueError as e:
@@ -120,4 +120,8 @@ k_stats = {k : stats for (k,v) in bsrv.items() if (stats := get_bkt_stats(v,GRP_
 print(json.dumps({str(k): v for (k,v) in k_stats.items()},indent=2))
 # print(json.dumps({str(k) : str(v) for (k,v) in filter(lambda x: x[1],k_stats.items())},indent=2))
 print(get_higher_alert_types(bsrv))
-print(get_cs_paradigm_odd(bsrv,GRP_SRV))
+print(json.dumps({str(k): v for (k,v) in get_cs_paradigm_odd(bsrv,GRP_SRV).items()},indent=2))
+print(json.dumps({str(k): v for (k,v) in get_blk_peer(bsrv,GRP_SRV).items()},indent=2))
+print(json.dumps({str(k): v for (k,v) in get_periodic(bsrv).items()},indent=2))
+print(json.dumps({str(k): v for (k,v) in get_bat_samefile(bsrv).items()},indent=2))
+print(json.dumps({str(k): v for (k,v) in get_bat_missingUA(bsrv).items()},indent=2))

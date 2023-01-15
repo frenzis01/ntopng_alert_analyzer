@@ -7,6 +7,7 @@ import struct
 import socket
 import numpy as np
 import datetime as dt
+import itertools
 
 bkt_srv = {}
 bkt_cli = {}
@@ -273,8 +274,8 @@ def get_higher_alert_types(bkt: dict):
     #   Note: x should never be None, but it's safer to check regardless
     relevant_keys = filter(lambda x: x and len(x) > 1,bkt.keys())
     
-    # Count the number of alert_types for each group ("ip","vlan_id")
-    nat = Counter(map(lambda x: (x[0],x[1]), relevant_keys))
+    # Count the number of alert_types for each group ("ip","vlan_id") or ("srv","cli","vlan_id")
+    nat = Counter(map(lambda x: ((x[0],x[1]) if len(x) == 3 else (x[0],x[1],x[2])), relevant_keys))
     # Consider only groups which generated at least 2 different alert types
     n_alert_types_per_key = {x: count for x, count in nat.items() if count >= 2}
 
@@ -311,11 +312,12 @@ def get_cs_paradigm_odd(bkt: dict, GRP_CRIT:int):
             return "odd_client"
         return None
     
-    # TODO group on ip,vlan and exclude alert_id from k
-    # currently k = (ip,vlan,alert_id) leading to
-    # (192.168.1.1,42,15) != (192.168.1.1,42,26)
-    # but (ip,vlan) is the same
-    return {k: oddity for (k,v) in bkt_s.items() if (oddity := is_odd(v))}
+    # k = ("ip","vlan","alert_id") we must exclude "alert_id" 
+    tmp= {k: oddity for (k,v) in bkt_s.items() if (oddity := is_odd(v))}
+    hosts = {}
+    for k,v in tmp.items():
+        hosts[(k[0],k[1])] = v
+    return hosts
 
 # @returns groups which are strongly periodic (i.e. tdiff_CV < 1.0)
 def get_periodic(bkt: dict):
@@ -329,25 +331,46 @@ def get_similar_periodicity(bkt: dict):
     # TODO find a criteria to group similar periodicities
 
 
+# @returns groups associated with BAT alerts transferring always the same file
 def get_bat_samefile(bkt:dict):
     # TODO it's not this function responsability to compute stats
     bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
     return {k: "bat_samefile:" + v["bft_same_file"] for (k,v) in bkt_s.items() if v["bft_same_file"] != ""}
 
+# @returns groups associated with BAT alerts with high percentage of missing User-Agent
 def get_bat_missingUA(bkt:dict):
     # TODO it's not this function responsability to compute stats
     bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
     
     # Percentage of missing User-Agent in BFT alerts
     NO_UA_PERC_TH = 0.75
-    return {k: "bat_missingUA" for (k,v) in bkt_s.items() if s["noUA_perc"] > NO_UA_PERC_TH}
+    return {k: "bat_missingUA" for (k,v) in bkt_s.items() if v["noUA_perc"] > NO_UA_PERC_TH}
 
+# @returns (srv XOR cli) groups with a high percentage of blacklisted hosts
 def get_blk_peer(bkt:dict,GRP_CRIT:int):
     if GRP_CRIT not in range(2):
         raise Exception("Invalid grouping criteria, only GRP_SRV and GRP_CLI available")
     
     # TODO it's not this function responsability to compute stats
     bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    
+    # Blacklisted hosts percentage threshold
     BLK_PERC_TH = 0.25
-    if (GRP_CRIT == GRP_SRV)
-    # return {k: "blk_cli_peer" for (k,v) in bkt_s.items() if s["noUA_perc"] > NO_UA_PERC_TH}
+
+    
+    excludes = ["blacklisted"]
+    if (GRP_CRIT == GRP_SRV):
+        peers = {k: "blk_cli_peer" for (k, v) in bkt_s.items()
+                 if (v["cli_ip_blk"] > BLK_PERC_TH and v["alert_name"] not in excludes)}
+    if (GRP_CRIT == GRP_CLI):
+        peers = {k: "blk_cli_peer" for (k, v) in bkt_s.items()
+                 if (v["cli_ip_blk"] > BLK_PERC_TH and v["alert_name"] not in excludes)}
+
+    print(json.dumps({str(k):v for k,v in peers.items()},indent=2))
+    
+    # TODO group on the first IP segment
+    # k = ("ip","vlan","alert_id") we must exclude "alert_id" 
+    hosts = {}
+    for k,v in peers.items():
+        hosts[(k[0],k[1])] = v
+    return hosts
