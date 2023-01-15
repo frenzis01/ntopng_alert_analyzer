@@ -8,6 +8,7 @@ import socket
 import numpy as np
 import datetime as dt
 import itertools
+import re
 
 bkt_srv = {}
 bkt_cli = {}
@@ -314,10 +315,10 @@ def get_cs_paradigm_odd(bkt: dict, GRP_CRIT:int):
     
     # k = ("ip","vlan","alert_id") we must exclude "alert_id" 
     tmp= {k: oddity for (k,v) in bkt_s.items() if (oddity := is_odd(v))}
-    hosts = {}
-    for k,v in tmp.items():
-        hosts[(k[0],k[1])] = v
-    return hosts
+    # hosts = {}
+    # for k,v in tmp.items():
+    #     hosts[(k[0],k[1])] = v
+    return group_hosts_first2IPblocks(tmp)
 
 # @returns groups which are strongly periodic (i.e. tdiff_CV < 1.0)
 def get_periodic(bkt: dict):
@@ -327,8 +328,10 @@ def get_periodic(bkt: dict):
 
 def get_similar_periodicity(bkt: dict):
     # TODO it's not this function responsability to compute stats
-    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    bkt_s_periodic = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV) and stats["tdiff_CV"] < 2.0)}
     # TODO find a criteria to group similar periodicities
+    periods = map(lambda x: x["tdiff_avg"],bkt_s_periodic.values())
+    
 
 
 # @returns groups associated with BAT alerts transferring always the same file
@@ -344,7 +347,11 @@ def get_bat_missingUA(bkt:dict):
     
     # Percentage of missing User-Agent in BFT alerts
     NO_UA_PERC_TH = 0.75
-    return {k: "bat_missingUA" for (k,v) in bkt_s.items() if v["noUA_perc"] > NO_UA_PERC_TH}
+    tmp = {k: "bat_missingUA" for (k,v) in bkt_s.items() if v["noUA_perc"] > NO_UA_PERC_TH}
+
+    return group_hosts_first2IPblocks(tmp)
+
+
 
 # @returns (srv XOR cli) groups with a high percentage of blacklisted hosts
 def get_blk_peer(bkt:dict,GRP_CRIT:int):
@@ -366,11 +373,29 @@ def get_blk_peer(bkt:dict,GRP_CRIT:int):
         peers = {k: "blk_cli_peer" for (k, v) in bkt_s.items()
                  if (v["cli_ip_blk"] > BLK_PERC_TH and v["alert_name"] not in excludes)}
 
-    print(json.dumps({str(k):v for k,v in peers.items()},indent=2))
+    # print(json.dumps({str(k):v for k,v in peers.items()},indent=2))
     
-    # TODO group on the first IP segment
     # k = ("ip","vlan","alert_id") we must exclude "alert_id" 
-    hosts = {}
-    for k,v in peers.items():
-        hosts[(k[0],k[1])] = v
-    return hosts
+    
+    # This returns all specific hosts
+    # for k,v in peers.items():
+    #     hosts[(k[0],k[1])] = v
+    
+    # In the following way, we produce group similar IPs
+    return group_hosts_first2IPblocks(peers)
+
+def group_hosts_first2IPblocks(hosts: dict):
+    tmp = {}
+    for k,v in hosts.items():
+        # determine whether it is IPv4 or IPv6 addr
+        sep = "." if (k[0].find(".") != -1) else ":"
+        # get the first 2 blocks of IP addr; i.e. 192.168.1.1 -> 192.168
+        ip1 = sep.join(re.split('\.|:',k[0],2)[:2])
+        if(len(k) == 4):    # (srv,cli,vlan,alert_id)
+            # parse second IP
+            ip2 = sep.join(re.split('\.|:',k[1],2)[:2])
+            tmp[(ip1,ip2,k[2])] = v
+        else: # len(k) == 3
+            tmp[(ip1,k[1])] = v
+    
+    return tmp
