@@ -329,50 +329,44 @@ def get_periodic(bkt: dict):
 def get_similar_periodicity(bkt: dict):
     # TODO it's not this function responsability to compute stats
     bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
-    # TODO find a criteria to group similar periodicities
-    # periods = map(lambda x: x["tdiff_avg"],bkt_s_periodic.values())
-    # bins = {}
-    # step = 30
-    # for i in range(min(periods),max(periods),step):
-    #     bins[i] = []
-    
-    # for i in periods:
-    #     i
-    bins = {}
-    periods = sorted({k: (v["tdiff_avg"],v["tdiff_CV"]) for (k,v) in bkt_s.items() if v["tdiff_CV"] < 2.0}.items(),key=lambda x: x[1][1],)
-    
-    def are_similar(a,b):
-        return (a - b) <= 30
 
+    # filter only periodic groups, i.e. tdiff_CV < 2.0
+    # Sort on tdiff_CV, positioning in the list head the "most periodic", 
+    # or "most accurate" alert groups
+    # periods = { K : (period, CV) }    with K = (IP,VLAN,ALERT_ID)
+    periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"]) for (k, v) in bkt_s.items()
+                      if v["tdiff_CV"] < 2.0}.items(),
+                     key=lambda x: x[1][1],)
+    
+    bins = {}   # bins will hold the result
+    # bins = { "P" : [ K1,K2,...,KN ]}    
+    # with P = period string %H:%M:%S && Ki | Ki["tdiff_avg"] 'is similar to' P
+    
+    # Basic criteria to cluster the data
+    def are_similar(a,b):
+        return abs(a - b) <= 60
+
+    # Tries to add x to the FIRST similar bin found
     def add_to_bin(x):
         curr_tdiff_avg = str_to_timedelta(x[1][0]).total_seconds()
+        # Iterate on the period keys
         for str_bin_key in bins.keys():
-            # b = (tdiff_avg, [periodic alert groups])
             bin_key = str_to_timedelta(str_bin_key).total_seconds()
             if are_similar(curr_tdiff_avg,bin_key):
-                bins[str_bin_key].append(x[0])
+                bins[str_bin_key].append(x)
                 return 1
-        
+        # No bin with similar period found
         return None
-            # if return
             
-
     for p in periods:
         if not add_to_bin(p):
+            # If there is no similar bin key to p, create one
             bin_key = p[1][0] # = p["tdiff_avg"]
-            bins[bin_key] = [p[0]]
+            bins[bin_key] = []
 
-    return {k : len(v) for (k,v) in bins.items()}
-    # values = list(map(lambda x: x["tdiff_avg"],filter(lambda x: x[1]["tdiff_CV"] < 2.0, bkt_s_periodic.items())))
-    # import matplotlib.pyplot as plt
-
-    # _ = plt.hist(values, bins='auto')  # arguments are passed to np.histogram
-
-    # plt.title("Histogram with 'auto' bins")
-    # plt.show()
-    
-    # for i in periods
-
+    # TODO Remap bins.keys() to represent the average period in the bin
+    # k = str(np.mean(list(map(lambda x: str_to_timedelta(x[1][0]).total_seconds(), v))))
+    return { k : len(v) for (k,v) in bins.items()}
     
 
 
