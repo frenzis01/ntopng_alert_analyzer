@@ -111,6 +111,7 @@ except ValueError as e:
 
 # from analyzer.alertdb import *
 from analyzer.handler import *
+print("Handling alerts")
 for a in raw_alerts:
     alert_handler(a)
 
@@ -125,3 +126,4 @@ print(json.dumps({str(k): v for (k,v) in get_blk_peer(bsrv,GRP_SRV).items()},ind
 print(json.dumps({str(k): v for (k,v) in get_periodic(bsrv).items()},indent=2))
 print(json.dumps({str(k): v for (k,v) in get_bat_samefile(bsrv).items()},indent=2))
 print(json.dumps({str(k): v for (k,v) in get_bat_missingUA(bsrv).items()},indent=2))
+print(json.dumps(get_similar_periodicity(bsrv),indent=2))

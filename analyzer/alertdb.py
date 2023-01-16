@@ -324,13 +324,55 @@ def get_cs_paradigm_odd(bkt: dict, GRP_CRIT:int):
 def get_periodic(bkt: dict):
     # TODO it's not this function responsability to compute stats
     bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
-    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] < 1.0}
+    return {k: (v["tdiff_avg"],v["tdiff_CV"]) for (k,v) in bkt_s.items() if v["tdiff_CV"] < 1.0}
 
 def get_similar_periodicity(bkt: dict):
     # TODO it's not this function responsability to compute stats
-    bkt_s_periodic = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV) and stats["tdiff_CV"] < 2.0)}
+    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
     # TODO find a criteria to group similar periodicities
-    periods = map(lambda x: x["tdiff_avg"],bkt_s_periodic.values())
+    # periods = map(lambda x: x["tdiff_avg"],bkt_s_periodic.values())
+    # bins = {}
+    # step = 30
+    # for i in range(min(periods),max(periods),step):
+    #     bins[i] = []
+    
+    # for i in periods:
+    #     i
+    bins = {}
+    periods = sorted({k: (v["tdiff_avg"],v["tdiff_CV"]) for (k,v) in bkt_s.items() if v["tdiff_CV"] < 2.0}.items(),key=lambda x: x[1][1],)
+    
+    def are_similar(a,b):
+        return (a - b) <= 30
+
+    def add_to_bin(x):
+        curr_tdiff_avg = str_to_timedelta(x[1][0]).total_seconds()
+        for str_bin_key in bins.keys():
+            # b = (tdiff_avg, [periodic alert groups])
+            bin_key = str_to_timedelta(str_bin_key).total_seconds()
+            if are_similar(curr_tdiff_avg,bin_key):
+                bins[str_bin_key].append(x[0])
+                return 1
+        
+        return None
+            # if return
+            
+
+    for p in periods:
+        if not add_to_bin(p):
+            bin_key = p[1][0] # = p["tdiff_avg"]
+            bins[bin_key] = [p[0]]
+
+    return {k : len(v) for (k,v) in bins.items()}
+    # values = list(map(lambda x: x["tdiff_avg"],filter(lambda x: x[1]["tdiff_CV"] < 2.0, bkt_s_periodic.items())))
+    # import matplotlib.pyplot as plt
+
+    # _ = plt.hist(values, bins='auto')  # arguments are passed to np.histogram
+
+    # plt.title("Histogram with 'auto' bins")
+    # plt.show()
+    
+    # for i in periods
+
     
 
 
@@ -399,3 +441,8 @@ def group_hosts_first2IPblocks(hosts: dict):
             tmp[(ip1,k[1])] = v
     
     return tmp
+
+def str_to_timedelta(s: str) -> dt.timedelta:
+    d = dt.datetime.strptime(s, "%H:%M:%S")
+    total_sec = d.hour*3600 + d.minute*60 + d.second  # total seconds calculation
+    return dt.timedelta(seconds=total_sec)
