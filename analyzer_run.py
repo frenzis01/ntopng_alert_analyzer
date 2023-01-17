@@ -114,16 +114,6 @@ from analyzer.handler import *
 print("Handling alerts")
 for a in raw_alerts:
     alert_handler(a)
+update_bkts_stats()
 
-bsrv = get_bkt(GRP_SRV)
-k_stats = {k : stats for (k,v) in bsrv.items() if (stats := get_bkt_stats(v,GRP_SRV))}
-# print(k_stats)
-print(json.dumps({str(k): v for (k,v) in k_stats.items()},indent=2))
-# print(json.dumps({str(k) : str(v) for (k,v) in filter(lambda x: x[1],k_stats.items())},indent=2))
-print(get_higher_alert_types(bsrv))
-print(json.dumps({str(k): v for (k,v) in get_cs_paradigm_odd(bsrv,GRP_SRV).items()},indent=2))
-print(json.dumps({str(k): v for (k,v) in get_blk_peer(bsrv,GRP_SRV).items()},indent=2))
-print(json.dumps({str(k): v for (k,v) in get_periodic(bsrv).items()},indent=2))
-print(json.dumps({str(k): v for (k,v) in get_bat_samefile(bsrv).items()},indent=2))
-print(json.dumps({str(k): v for (k,v) in get_bat_missingUA(bsrv).items()},indent=2))
-print(json.dumps(get_similar_periodicity(bsrv),indent=2))
+print(json.dumps(get_sup_level_alerts(),indent=2))

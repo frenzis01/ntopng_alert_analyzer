@@ -10,9 +10,15 @@ import datetime as dt
 import itertools
 import re
 
+STREAMING_MODE = False
+
 bkt_srv = {}
 bkt_cli = {}
 bkt_srvcli = {}
+
+bkt_srv_stats = {}
+bkt_cli_stats = {}
+bkt_srvcli_stats = {}
 
 GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
 
@@ -27,6 +33,15 @@ def new_alert(a):
     bkt_cli = add_to_bucket(a,bkt_cli,(a["cli_ip"], a["vlan_id"], a["alert_id"]))
     bkt_srvcli = add_to_bucket(a,bkt_srvcli,(a["srv_ip"],a["cli_ip"], a["vlan_id"], a["alert_id"]))
 
+    if STREAMING_MODE:
+        # TODO harvesting()
+        update_bkts_stats()
+
+def update_bkts_stats() :
+    global bkt_srv_stats,bkt_cli_stats,bkt_srvcli_stats
+    bkt_srv_stats = {k : stats for (k,v) in bkt_srv.items() if (stats := compute_bkt_stats(v,GRP_SRV))}
+    bkt_cli_stats = {k : stats for (k,v) in bkt_cli.items() if (stats := compute_bkt_stats(v,GRP_CLI))}
+    bkt_srvcli_stats = {k : stats for (k,v) in bkt_srvcli.items() if (stats := compute_bkt_stats(v,GRP_SRVCLI))}
 
 def add_to_bucket(alert, bkt, key):
     try:
@@ -48,6 +63,44 @@ def get_bkt(BKT: int) -> dict:
     if (BKT == GRP_SRVCLI):
         return bkt_srvcli
 
+
+def get_bkt_stats(BKT: int) -> dict:
+    if (BKT not in range(3)):
+        raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
+    if (BKT == GRP_SRV):
+        return bkt_srv_stats
+    if (BKT == GRP_CLI):
+        return bkt_cli_stats
+    if (BKT == GRP_SRVCLI):
+        return bkt_srvcli_stats
+
+def map_id_to_name(GRP_CRIT:int):
+    if (GRP_CRIT not in range(3)):
+        raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
+    if (GRP_CRIT == GRP_SRV):
+        return "SRV"
+    if (GRP_CRIT == GRP_CLI):
+        return "CLI"
+    if (GRP_CRIT == GRP_SRVCLI):
+        return "SRVCLI"
+
+# Needed because json.dumps doesn't accept tuples as keys
+def str_key(d:dict):
+    return {str(k): v for (k,v) in d.items()}
+
+def get_sup_level_alerts() -> dict:
+    sup_level_alerts = {}
+    for grp_crit in [GRP_SRV,GRP_CLI,GRP_SRVCLI]:
+        sup_level_alerts[map_id_to_name(grp_crit)] = {
+            "higher_alert_types" : str_key(get_higher_alert_types(get_bkt(grp_crit))),
+            "cs_paradigm_odd" : str_key(get_cs_paradigm_odd(GRP_SRV)),
+            "blk_peer" : str_key(get_blk_peer(GRP_SRV)),
+            "periodic" : str_key(get_periodic(GRP_SRV)),
+            "bat_samefile" : str_key(get_bat_samefile(GRP_SRV)),
+            "bat_missingUA" : str_key(get_bat_missingUA(GRP_SRV)),
+            "similar_periodicity" : get_similar_periodicity(GRP_SRV),
+        }
+    return sup_level_alerts
 
 # UTILITIES
 def a_convert_dtypes(a):
@@ -107,7 +160,7 @@ def remove_unwanted_fields(a):
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
 MIN_BKT_RELEVANT_SIZE = 3
 
-def get_bkt_stats(s: list, GRP_CRIT: int):
+def compute_bkt_stats(s: list, GRP_CRIT: int):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
     if len(s) < MIN_BKT_RELEVANT_SIZE:
@@ -284,19 +337,18 @@ def get_higher_alert_types(bkt: dict):
     if len(n_alert_types_per_key) == 0:
         return {}
     
-    n_alert_types_mean = np.mean(list(n_alert_types_per_key.values()))
+    n_alert_types_mean = math.ceil(np.mean(list(n_alert_types_per_key.values())))
 
     # return only keys s.t. n_alerts > mean
     return {x: count for x, count in n_alert_types_per_key.items() if count > n_alert_types_mean}
 
 # returns hosts which do not behave according to
 # the client-server paradigm
-def get_cs_paradigm_odd(bkt: dict, GRP_CRIT:int):
+def get_cs_paradigm_odd(GRP_CRIT:int):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
     
-    # TODO it's not this function responsability to compute stats
-    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    bkt_s = get_bkt_stats(GRP_CRIT)
     
     # In the client-server paradigm, the common behavior is that
     # srv uses always the same known port, while clients use ephimeral ones
@@ -320,15 +372,14 @@ def get_cs_paradigm_odd(bkt: dict, GRP_CRIT:int):
     #     hosts[(k[0],k[1])] = v
     return group_hosts_first2IPblocks(tmp)
 
-# @returns groups which are strongly periodic (i.e. tdiff_CV < 1.0)
-def get_periodic(bkt: dict):
-    # TODO it's not this function responsability to compute stats
-    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
-    return {k: (v["tdiff_avg"],v["tdiff_CV"]) for (k,v) in bkt_s.items() if v["tdiff_CV"] < 1.0}
+# @returns groups which are strongly periodic (i.e. tdiff_CV < 0.85)
+def get_periodic(GRP_CRIT:int):
+    bkt_s = get_bkt_stats(GRP_CRIT)
+    # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"])
+    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] < 0.85}
 
-def get_similar_periodicity(bkt: dict):
-    # TODO it's not this function responsability to compute stats
-    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+def get_similar_periodicity(GRP_CRIT:int):
+    bkt_s = get_bkt_stats(GRP_CRIT)
 
     # filter only periodic groups, i.e. tdiff_CV < 2.0
     # Sort on tdiff_CV, positioning in the list head the "most periodic", 
@@ -362,25 +413,23 @@ def get_similar_periodicity(bkt: dict):
         if not add_to_bin(p):
             # If there is no similar bin key to p, create one
             bin_key = p[1][0] # = p["tdiff_avg"]
-            bins[bin_key] = []
+            bins[bin_key] = [p]
 
     # TODO Remap bins.keys() to represent the average period in the bin
-    # k = str(np.mean(list(map(lambda x: str_to_timedelta(x[1][0]).total_seconds(), v))))
-    return { k : len(v) for (k,v) in bins.items()}
+    def get_avg_tdiff(v: list):
+        return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: str_to_timedelta(x[1][0]).total_seconds(), v))))))
+    return { get_avg_tdiff(v) : len(v) for (k,v) in bins.items()}
     
 
 
 # @returns groups associated with BAT alerts transferring always the same file
-def get_bat_samefile(bkt:dict):
-    # TODO it's not this function responsability to compute stats
-    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+def get_bat_samefile(GRP_CRIT:int):
+    bkt_s = get_bkt_stats(GRP_CRIT)
     return {k: "bat_samefile:" + v["bft_same_file"] for (k,v) in bkt_s.items() if v["bft_same_file"] != ""}
 
 # @returns groups associated with BAT alerts with high percentage of missing User-Agent
-def get_bat_missingUA(bkt:dict):
-    # TODO it's not this function responsability to compute stats
-    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
-    
+def get_bat_missingUA(GRP_CRIT:int):
+    bkt_s = get_bkt_stats(GRP_CRIT)
     # Percentage of missing User-Agent in BFT alerts
     NO_UA_PERC_TH = 0.75
     tmp = {k: "bat_missingUA" for (k,v) in bkt_s.items() if v["noUA_perc"] > NO_UA_PERC_TH}
@@ -390,12 +439,11 @@ def get_bat_missingUA(bkt:dict):
 
 
 # @returns (srv XOR cli) groups with a high percentage of blacklisted hosts
-def get_blk_peer(bkt:dict,GRP_CRIT:int):
+def get_blk_peer(GRP_CRIT:int):
     if GRP_CRIT not in range(2):
         raise Exception("Invalid grouping criteria, only GRP_SRV and GRP_CLI available")
     
-    # TODO it's not this function responsability to compute stats
-    bkt_s = {k : stats for (k,v) in bkt.items() if (stats := get_bkt_stats(v,GRP_SRV))}
+    bkt_s = get_bkt_stats(GRP_CRIT)
     
     # Blacklisted hosts percentage threshold
     BLK_PERC_TH = 0.25
