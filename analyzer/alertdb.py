@@ -52,7 +52,7 @@ def add_to_bucket(alert, bkt, key):
         bkt[key] = [alert]
     return bkt
 
-
+# GETTERS
 def get_bkt(BKT: int) -> dict:
     if (BKT not in range(3)):
         raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
@@ -84,11 +84,12 @@ def map_id_to_name(GRP_CRIT:int):
     if (GRP_CRIT == GRP_SRVCLI):
         return "SRVCLI"
 
-# Needed because json.dumps doesn't accept tuples as keys
-def str_key(d:dict):
-    return {str(k): v for (k,v) in d.items()}
 
 def get_sup_level_alerts() -> dict:
+    # Needed because json.dumps doesn't accept tuples as keys
+    def str_key(d:dict):
+        return {str(k): v for (k,v) in d.items()}
+    
     sup_level_alerts = {}
     for grp_crit in [GRP_SRV,GRP_CLI,GRP_SRVCLI]:
         sup_level_alerts[map_id_to_name(grp_crit)] = {
@@ -102,7 +103,7 @@ def get_sup_level_alerts() -> dict:
         }
     return sup_level_alerts
 
-# UTILITIES
+# New alert handling UTILITIES 
 def a_convert_dtypes(a):
 
     # format 2023-01-13 17:37:31
@@ -314,6 +315,7 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     )
     return d
 
+# Superior level alert generation Getters
 
 # @returns groups which generated a higher number 
 # of different alert types than others
@@ -415,7 +417,6 @@ def get_similar_periodicity(GRP_CRIT:int):
             bin_key = p[1][0] # = p["tdiff_avg"]
             bins[bin_key] = [p]
 
-    # TODO Remap bins.keys() to represent the average period in the bin
     def get_avg_tdiff(v: list):
         return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: str_to_timedelta(x[1][0]).total_seconds(), v))))))
     return { get_avg_tdiff(v) : len(v) for (k,v) in bins.items()}
