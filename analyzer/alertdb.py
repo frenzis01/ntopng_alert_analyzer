@@ -450,7 +450,7 @@ def get_similar_periodicity(GRP_CRIT:int):
 # @returns groups associated with BAT alerts transferring always the same file
 def get_bat_samefile(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
-    return {k: "bat_samefile:" + v["bft_same_file"] for (k,v) in bkt_s.items() if v["bft_same_file"] != ""}
+    return {k: v["bft_same_file"] for (k,v) in bkt_s.items() if v["bft_same_file"] != ""}
 
 # @returns groups associated with BAT alerts with high percentage of missing User-Agent
 def get_bat_missingUA(GRP_CRIT:int):
