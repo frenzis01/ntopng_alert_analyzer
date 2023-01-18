@@ -93,13 +93,15 @@ def get_sup_level_alerts() -> dict:
     sup_level_alerts = {}
     for grp_crit in [GRP_SRV,GRP_CLI,GRP_SRVCLI]:
         sup_level_alerts[map_id_to_name(grp_crit)] = {
-            "higher_alert_types" : str_key(get_higher_alert_types(get_bkt(grp_crit))),
-            "cs_paradigm_odd" : str_key(get_cs_paradigm_odd(GRP_SRV)),
-            "blk_peer" : str_key(get_blk_peer(GRP_SRV)),
-            "periodic" : str_key(get_periodic(GRP_SRV)),
-            "bat_samefile" : str_key(get_bat_samefile(GRP_SRV)),
-            "bat_missingUA" : str_key(get_bat_missingUA(GRP_SRV)),
-            "similar_periodicity" : get_similar_periodicity(GRP_SRV),
+            "higher_alert_types" : str_key(get_higher_alert_types(grp_crit)),
+            "tls_critical" : str_key(get_tls_critical(grp_crit)),
+            "cs_paradigm_odd" : str_key(get_cs_paradigm_odd(grp_crit)),
+            "blk_peer" : str_key(get_blk_peer(grp_crit)),
+            "simultaneous" : str_key(get_simultaneous(grp_crit)),
+            "periodic" : str_key(get_periodic(grp_crit)),
+            "similar_periodicity" : get_similar_periodicity(grp_crit),
+            "bat_samefile" : str_key(get_bat_samefile(grp_crit)),
+            "bat_missingUA" : str_key(get_bat_missingUA(grp_crit)),
         }
     return sup_level_alerts
 
@@ -319,7 +321,11 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
 
 # @returns groups which generated a higher number 
 # of different alert types than others
-def get_higher_alert_types(bkt: dict):
+def get_higher_alert_types(GRP_CRIT: int):
+    if GRP_CRIT not in range(3):
+        raise Exception("Invalid grouping criteria")
+
+    bkt = get_bkt(GRP_CRIT)
 
     # keys are tuples -> ("ip","vlan_id","alert_id")
     # To obtain #{distinct alert_id} for each ("ip","vlan_id") we can map
@@ -343,6 +349,19 @@ def get_higher_alert_types(bkt: dict):
 
     # return only keys s.t. n_alerts > mean
     return {x: count for x, count in n_alert_types_per_key.items() if count > n_alert_types_mean}
+
+def get_tls_critical(GRP_CRIT: int):
+    if GRP_CRIT not in range(3):
+        raise Exception("Invalid grouping criteria")
+
+    # TODO optimize use alert_id instead of alert_name.find(tls)
+    bkts_tls_alerts = filter(lambda x: not (x[1]["alert_name"].find("tls") == -1), get_bkt_stats(GRP_CRIT).items())
+    
+    # Count the number of alert_types for each group ("ip","vlan_id") or ("srv","cli","vlan_id")
+    critical_tls_hosts = Counter(map(lambda x: ((x[0][0],x[0][1]) if len(x[0]) == 3 else (x[0][0],x[0][1],x[0][2])), bkts_tls_alerts))
+    # Consider only groups which generated at least 2 different alert types
+    return {x: count for x, count in critical_tls_hosts.items() if count >= 2}
+
 
 # returns hosts which do not behave according to
 # the client-server paradigm
@@ -375,10 +394,15 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
     return group_hosts_first2IPblocks(tmp)
 
 # @returns groups which are strongly periodic (i.e. tdiff_CV < 0.85)
+def get_simultaneous(GRP_CRIT:int):
+    bkt_s = get_bkt_stats(GRP_CRIT)
+    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] == 0}
+
 def get_periodic(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
+    THRESHOLD = 0.85
     # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"])
-    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] < 0.85}
+    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] < THRESHOLD and v["tdiff_CV"] > 0.0}
 
 def get_similar_periodicity(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
@@ -388,7 +412,7 @@ def get_similar_periodicity(GRP_CRIT:int):
     # or "most accurate" alert groups
     # periods = { K : (period, CV) }    with K = (IP,VLAN,ALERT_ID)
     periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"]) for (k, v) in bkt_s.items()
-                      if v["tdiff_CV"] < 2.0}.items(),
+                      if v["tdiff_CV"] < 2.0 and v["tdiff_CV"] > 0.0}.items(),
                      key=lambda x: x[1][1],)
     
     bins = {}   # bins will hold the result
@@ -441,6 +465,8 @@ def get_bat_missingUA(GRP_CRIT:int):
 
 # @returns (srv XOR cli) groups with a high percentage of blacklisted hosts
 def get_blk_peer(GRP_CRIT:int):
+    if GRP_CRIT == GRP_SRVCLI:
+        return {}
     if GRP_CRIT not in range(2):
         raise Exception("Invalid grouping criteria, only GRP_SRV and GRP_CLI available")
     
