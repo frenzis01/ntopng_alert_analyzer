@@ -110,10 +110,10 @@ except ValueError as e:
 
 
 # from analyzer.alertdb import *
-from analyzer.handler import *
+from analyzer.alertdb import *
 print("\tHandling alerts")
 for a in raw_alerts:
-    alert_handler(a)
+    new_alert(a)
 update_bkts_stats()
 
 print(json.dumps(get_sup_level_alerts(),indent=2))

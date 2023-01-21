@@ -39,6 +39,7 @@ def new_alert(a):
 
 def update_bkts_stats() :
     global bkt_srv_stats,bkt_cli_stats,bkt_srvcli_stats
+    # the if statement filters groups with a too small size
     bkt_srv_stats = {k : stats for (k,v) in bkt_srv.items() if (stats := compute_bkt_stats(v,GRP_SRV))}
     bkt_cli_stats = {k : stats for (k,v) in bkt_cli.items() if (stats := compute_bkt_stats(v,GRP_CLI))}
     bkt_srvcli_stats = {k : stats for (k,v) in bkt_srvcli.items() if (stats := compute_bkt_stats(v,GRP_SRVCLI))}
@@ -398,11 +399,16 @@ def get_simultaneous(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
     return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] == 0}
 
+
+MIN_PERIODIC_SIZE = 3
 def get_periodic(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
     THRESHOLD = 0.85
-    # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"])
-    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] < THRESHOLD and v["tdiff_CV"] > 0.0}
+    # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"],v["size"]))
+    return {k: v["tdiff_avg"] for (k, v) in bkt_s.items()
+            if v["tdiff_CV"] < THRESHOLD
+            and v["tdiff_CV"] > 0.0
+            and v["size"] >= MIN_PERIODIC_SIZE}
 
 def get_similar_periodicity(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
@@ -412,7 +418,9 @@ def get_similar_periodicity(GRP_CRIT:int):
     # or "most accurate" alert groups
     # periods = { K : (period, CV) }    with K = (IP,VLAN,ALERT_ID)
     periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"]) for (k, v) in bkt_s.items()
-                      if v["tdiff_CV"] < 2.0 and v["tdiff_CV"] > 0.0}.items(),
+                      if v["tdiff_CV"] < 2.0 
+                      and v["tdiff_CV"] > 0.0
+                      and v["size"] > MIN_PERIODIC_SIZE}.items(),
                      key=lambda x: x[1][1],)
     
     bins = {}   # bins will hold the result
