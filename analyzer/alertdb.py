@@ -23,7 +23,7 @@ bkt_srvcli_stats = {}
 GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
 
 def to_be_ignored(a):
-    EXCLUDED_VLAN = ["2","9","24","53","57","58","203"]
+    EXCLUDED_VLAN = ["9","24","53","57","58","203"]
     if a["vlan_id"] in EXCLUDED_VLAN:
         return True
     return False
@@ -432,7 +432,7 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
 # @returns groups which are strongly periodic (i.e. tdiff_CV < 0.85)
 def get_simultaneous(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
-    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] == 0}
+    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] == 0 or v["tdiff_avg"] == "0:00:00"}
 
 
 MIN_PERIODIC_SIZE = 3
@@ -444,21 +444,23 @@ def get_periodic(GRP_CRIT:int):
 
     THRESHOLD = 0.85
     # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"],v["size"]))
-    return {k: v["tdiff_avg"] for (k, v) in bkt_s.items()
+    return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k, v) in bkt_s.items()
             if v["tdiff_CV"] < THRESHOLD
             and v["tdiff_CV"] > 0.0
+            and v["tdiff_avg"] != "0:00:00"
             and v["size"] >= MIN_PERIODIC_SIZE
             and v["alert_name"] not in excludes}
 
 def get_similar_periodicity(GRP_CRIT:int):
+    # TODO consider also the alert type
     bkt_s = get_bkt_stats(GRP_CRIT)
 
-    # filter only periodic groups, i.e. tdiff_CV < 2.0
+    # filter only periodic groups, i.e. tdiff_CV < 1.25
     # Sort on tdiff_CV, positioning in the list head the "most periodic", 
     # or "most accurate" alert groups
     # periods = { K : (period, CV) }    with K = (IP,VLAN,ALERT_ID)
-    periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"]) for (k, v) in bkt_s.items()
-                      if v["tdiff_CV"] < 2.0 
+    periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"],v["alert_name"]) for (k, v) in bkt_s.items()
+                      if v["tdiff_CV"] < 1.25 
                       and v["tdiff_CV"] > 0.0
                       and v["size"] > MIN_PERIODIC_SIZE}.items(),
                      key=lambda x: x[1][1],)
@@ -489,9 +491,21 @@ def get_similar_periodicity(GRP_CRIT:int):
             bin_key = p[1][0] # = p["tdiff_avg"]
             bins[bin_key] = [p]
 
+    def groupby_alertid(bin:list):
+        d = {}
+        for entry in bin:
+            # entry[0] = (IP,VLAN,ALERT_ID)
+            # entry[1] = (tdiff_avg,tdiff_CV,alert_name)
+            alert_name = entry[1][-1]
+            if alert_name not in d:
+                d[alert_name] = [entry[0][0:-1]]
+            else:
+                d[alert_name].append(entry[0][0:-1])
+        return {k : v for k,v in d.items() if len(v) >= 2}
+
     def get_avg_tdiff(v: list):
         return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: str_to_timedelta(x[1][0]).total_seconds(), v))))))
-    return { get_avg_tdiff(v) : len(v) for (k,v) in bins.items()}
+    return { get_avg_tdiff(v) : alert_grouped_bin for (k,v) in bins.items() if (alert_grouped_bin := groupby_alertid(v))}
     
 
 
