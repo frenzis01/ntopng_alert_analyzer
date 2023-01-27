@@ -229,8 +229,9 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     d["cli_attacker"] = sum(map(lambda x: x["is_cli_attacker"],s))/s_size
 
     # Get blacklisted IPs and count how many they are
-    d["srv_ip_blk"] = 0
-    d["cli_ip_blk"] = 0
+    # Initially assume they are equal to the first ip in the series
+    d["srv_ip_blk"] = s[0]["srv_blacklisted"]
+    d["cli_ip_blk"] = s[0]["cli_blacklisted"]
     if (GRP_CRIT == GRP_SRV):
         cli_ip_set = set(map(lambda x: (x["cli_ip"],x["cli_blacklisted"]), s))
         cli_ip_blk = set(filter(lambda x: x[1] == 1, cli_ip_set))
@@ -429,18 +430,21 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
     #     hosts[(k[0],k[1])] = v
     return get_hosts_noalertid(tmp)
 
+MIN_PERIODIC_SIZE = 3
 # @returns groups which are strongly periodic (i.e. tdiff_CV < 0.85)
 def get_simultaneous(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
-    return {k: v["tdiff_avg"] for (k,v) in bkt_s.items() if v["tdiff_CV"] == 0 or v["tdiff_avg"] == "0:00:00"}
+    return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k,v) in bkt_s.items() 
+            if ((v["tdiff_CV"] == 0
+                 or v["tdiff_avg"] == "0:00:00")
+            and v["size"] > MIN_PERIODIC_SIZE)}
 
 
-MIN_PERIODIC_SIZE = 3
 def get_periodic(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
 
     # Note: exclude not periodic relevant alerts
-    excludes = tls_alerts + ["remote_to_local_insecure_proto"]
+    excludes = tls_alerts + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
 
     THRESHOLD = 0.85
     # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"],v["size"]))
@@ -459,11 +463,16 @@ def get_similar_periodicity(GRP_CRIT:int):
     # Sort on tdiff_CV, positioning in the list head the "most periodic", 
     # or "most accurate" alert groups
     # periods = { K : (period, CV) }    with K = (IP,VLAN,ALERT_ID)
+
+    # Note: exclude not periodic relevant alerts
+    excludes = tls_alerts + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
+
     periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"],v["alert_name"]) for (k, v) in bkt_s.items()
-                      if v["tdiff_CV"] < 1.25 
+                      if (v["tdiff_CV"] < 1.25 
                       and v["tdiff_CV"] > 0.0
-                      and v["size"] > MIN_PERIODIC_SIZE}.items(),
-                     key=lambda x: x[1][1],)
+                      and v["size"] > MIN_PERIODIC_SIZE
+                      and v["alert_name"] not in excludes)}.items(),
+                     key=lambda x: x[1][1])
     
     bins = {}   # bins will hold the result
     # bins = { "P" : [ K1,K2,...,KN ]}    
