@@ -16,6 +16,10 @@ bkt_srv = {}
 bkt_cli = {}
 bkt_srvcli = {}
 
+singleton = {}
+
+bat_paths = {}
+
 bkt_srv_stats = {}
 bkt_cli_stats = {}
 bkt_srvcli_stats = {}
@@ -43,6 +47,11 @@ def new_alert(a):
     bkt_cli = add_to_bucket(a,bkt_cli,(a["cli_ip"], a["vlan_id"], a["alert_id"]))
     bkt_srvcli = add_to_bucket(a,bkt_srvcli,(a["srv_ip"],a["cli_ip"], a["vlan_id"], a["alert_id"]))
 
+    # add to singleton groups
+    global singleton
+    singleton = add_to_singleton(singleton,(a["srv_ip"], a["vlan_id"]),a, "SRV")
+    singleton = add_to_singleton(singleton,(a["cli_ip"], a["vlan_id"]),a, "CLI")
+
     if STREAMING_MODE:
         # TODO harvesting()
         update_bkts_stats()
@@ -63,6 +72,21 @@ def add_to_bucket(alert, bkt, key):
         bkt[key] = [alert]
     return bkt
 
+def add_to_singleton(bkt,key,alert,ip_role):
+    alert_name = get_alert_name(alert["json"])
+    try:
+        x = bkt[key] # throws KeyError if not existing
+        bkt.pop(key, None)
+    except KeyError:
+        bkt[key] = (alert_name,ip_role)
+    return bkt
+
+def add_bat_path(path):
+    if path in bat_paths:
+        return bat_paths
+    else:
+        bat_paths[path] = 1
+
 # GETTERS
 def get_bkt(BKT: int) -> dict:
     if (BKT not in range(3)):
@@ -74,6 +98,28 @@ def get_bkt(BKT: int) -> dict:
     if (BKT == GRP_SRVCLI):
         return bkt_srvcli
 
+# GETTERS
+RELEVANT_SINGLETON_ALERTS = [
+    "binary_application_transfer",
+    "remote_to_local_insecure_proto",
+    "ndpi_ssh_obsolete_client",
+    "ndpi_clear_text_credentials",
+    "ndpi_smb_insecure_version",
+    "data_exfiltration",
+    "ndpi_suspicious_dga_domain",
+    ]
+
+# def is_relevant_singleton(s):
+#     alert_name = s[0]
+#     crit = s[1]
+    
+#     if (alert_name == "ndpi_ssh_obsolete_client" and crit == "CLI"):
+#         return True
+#     if (alert_name == "binary_application_transfer"):
+
+
+def get_singleton() -> dict:
+    return {k: v for k,v in singleton.items() if v[0] in RELEVANT_SINGLETON_ALERTS}
 
 def get_bkt_stats(BKT: int) -> dict:
     if (BKT not in range(3)):
@@ -176,19 +222,19 @@ def remove_unwanted_fields(a):
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
 MIN_BKT_RELEVANT_SIZE = 3
 
+def get_alert_name(x):
+    o = json.loads(x)
+    try:
+        return o["alert_generation"]["script_key"]
+    except KeyError:
+        return "no_name"
+
 def compute_bkt_stats(s: list, GRP_CRIT: int):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
     if len(s) < MIN_BKT_RELEVANT_SIZE:
         return None
 
-    # Functions
-    def get_alert_name(x):
-        o = json.loads(x)
-        try:
-            return o["alert_generation"]["script_key"]
-        except KeyError:
-            return "no_name"
 
     # print(s)
     s_size = len(s)
@@ -284,7 +330,10 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     def get_BAT_path(x):
         o = json.loads(x)
         try:
-            return o["last_url"]
+            # add bat_paths
+            path = o["last_url"]
+            bat_paths[path] = 1
+            return path
         except KeyError:
             return ""
 
@@ -380,7 +429,8 @@ def get_higher_alert_types(GRP_CRIT: int):
     # return only keys s.t. n_alerts > mean
     return {x: count for x, count in n_alert_types_per_key.items() if count >= n_alert_types_mean}
 
-tls_alerts = ["tls_certificate_expired","tls_certificate_mismatch","tls_old_protocol_version","tls_unsafe_ciphers","tls_certificate_selfsigned"]
+tls_alerts = ["tls_certificate_expired","tls_certificate_mismatch","tls_old_protocol_version","tls_unsafe_ciphers"]
+# "tls_certificate_selfsigned"
 
 def get_tls_critical(GRP_CRIT: int):
     if GRP_CRIT not in range(3):

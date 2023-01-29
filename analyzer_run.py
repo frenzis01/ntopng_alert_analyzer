@@ -98,11 +98,10 @@ except ValueError as e:
 
 try:
 
-    print("\tSending request")
     my_historical = Historical(my_ntopng)
-    last15minutes = (datetime.datetime.now() -
-                     datetime.timedelta(minutes=30)).strftime('%s')
-    raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes, datetime.datetime.now().strftime(
+    last15minutes = datetime.datetime.now() - datetime.timedelta(minutes=30)
+    print("\tSending request "  + last15minutes.strftime("%H:%M:%S") + " --> " + datetime.datetime.now().strftime("%H:%M:%S") )
+    raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes.strftime('%s'), datetime.datetime.now().strftime(
         '%s'), "*", "severity = 5", 10000, "", "")
 except ValueError as e:
     print(e)
@@ -117,3 +116,6 @@ for a in raw_alerts:
 update_bkts_stats()
 
 print(json.dumps(get_sup_level_alerts(),indent=2))
+def str_key(d:dict):
+        return {str(k): v for (k,v) in d.items()}
+print(json.dumps(str_key(get_singleton()),indent=2))
