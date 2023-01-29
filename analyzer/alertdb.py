@@ -11,6 +11,7 @@ import itertools
 import re
 
 STREAMING_MODE = False
+LEARNING_PHASE = True
 
 bkt_srv = {}
 bkt_cli = {}
@@ -49,8 +50,7 @@ def new_alert(a):
 
     # add to singleton groups
     global singleton
-    singleton = add_to_singleton(singleton,(a["srv_ip"], a["vlan_id"]),a, "SRV")
-    singleton = add_to_singleton(singleton,(a["cli_ip"], a["vlan_id"]),a, "CLI")
+    singleton = add_to_singleton(singleton,a)
 
     if STREAMING_MODE:
         # TODO harvesting()
@@ -72,13 +72,15 @@ def add_to_bucket(alert, bkt, key):
         bkt[key] = [alert]
     return bkt
 
-def add_to_singleton(bkt,key,alert,ip_role):
+def add_to_singleton(bkt,alert):
     alert_name = get_alert_name(alert["json"])
+    key = is_relevant_singleton(alert)
     try:
         x = bkt[key] # throws KeyError if not existing
         bkt.pop(key, None)
     except KeyError:
-        bkt[key] = (alert_name,ip_role)
+        if key:
+            bkt[key] = (alert_name)
     return bkt
 
 def add_bat_path(path):
@@ -100,26 +102,42 @@ def get_bkt(BKT: int) -> dict:
 
 # GETTERS
 RELEVANT_SINGLETON_ALERTS = [
-    "binary_application_transfer",
+    # "binary_application_transfer",
     "remote_to_local_insecure_proto",
-    "ndpi_ssh_obsolete_client",
+    # "ndpi_ssh_obsolete_client",
     "ndpi_clear_text_credentials",
     "ndpi_smb_insecure_version",
     "data_exfiltration",
     "ndpi_suspicious_dga_domain",
     ]
 
-# def is_relevant_singleton(s):
-#     alert_name = s[0]
-#     crit = s[1]
+def is_relevant_singleton(a):
+    alert_name = get_alert_name(a["json"])
     
-#     if (alert_name == "ndpi_ssh_obsolete_client" and crit == "CLI"):
-#         return True
-#     if (alert_name == "binary_application_transfer"):
+    if (alert_name == "ndpi_ssh_obsolete_client"):
+        return (a["cli_ip"])
+    if (alert_name == "binary_application_transfer"
+       and alert_name not in bat_paths
+       and LEARNING_PHASE == False):
+        return (a["srv_ip"],a["cli_ip"])
+
+    key = (a["srv_ip"],a["cli_ip"])
+    if (a["is_srv_attacker"] == 1):
+        key = (a["srv_ip"])
+    if (a["is_cli_attacker"] == 1):
+        key = (a["cli_ip"])
+    if (a["is_srv_attacker"] == 1 and a["is_cli_attacker"] == 1):
+        key = (a["srv_ip"],a["cli_ip"])
+    if (alert_name in RELEVANT_SINGLETON_ALERTS):
+        return key
+    
+    return None
+
 
 
 def get_singleton() -> dict:
-    return {k: v for k,v in singleton.items() if v[0] in RELEVANT_SINGLETON_ALERTS}
+    # return {k: v for k,v in singleton.items() if v[0] in RELEVANT_SINGLETON_ALERTS}
+    return singleton
 
 def get_bkt_stats(BKT: int) -> dict:
     if (BKT not in range(3)):
