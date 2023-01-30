@@ -64,6 +64,9 @@ def update_bkts_stats() :
     bkt_srvcli_stats = {k : stats for (k,v) in bkt_srvcli.items() if (stats := compute_bkt_stats(v,GRP_SRVCLI))}
 
 def add_to_bucket(alert, bkt, key):
+    # DEBUG print
+    if (alert["alert_id"] == 47 and alert["score"] > 150):
+        print(json.dumps(json.loads(alert["json"]),indent=2))
     try:
         x = bkt[key] # throws KeyError if not existing
         bkt[key].append(alert)
@@ -100,41 +103,155 @@ def get_bkt(BKT: int) -> dict:
     if (BKT == GRP_SRVCLI):
         return bkt_srvcli
 
-# GETTERS
+
+TLS_ALERTS = ["tls_certificate_expired","tls_certificate_mismatch","tls_old_protocol_version","tls_unsafe_ciphers"]
+# "tls_certificate_selfsigned"
+
 RELEVANT_SINGLETON_ALERTS = [
     # "binary_application_transfer",
-    "remote_to_local_insecure_proto",
+    # "remote_to_local_insecure_proto",
     # "ndpi_ssh_obsolete_client",
-    "ndpi_clear_text_credentials",
+    # "ndpi_clear_text_credentials",
     "ndpi_smb_insecure_version",
     "data_exfiltration",
-    "ndpi_suspicious_dga_domain",
+    # "ndpi_suspicious_dga_domain",
     ]
+
+IGNORE_SINGLETON_ALERTS = [
+    "blacklisted",
+    "ndpi_dns_suspicious_traffic",
+    "ndpi_http_suspicious_user_agent",
+    "ndpi_suspicious_dga_domain",
+
+    "ndpi_ssh_obsolete_client",
+    "binary_application_transfer",
+    "ndpi_clear_text_credentials",
+    "remote_to_local_insecure_proto",
+
+] + TLS_ALERTS
+
+clear_text_usernames = {}
+dga_suspicious_domains = {}
 
 def is_relevant_singleton(a):
     alert_name = get_alert_name(a["json"])
     
+    CLI_IP = (a["cli_ip"],a["vlan_id"])
+    SRV_IP = (a["srv_ip"],a["vlan_id"])
+    SRVCLI_IP = (a["srv_ip"],a["cli_ip"],a["vlan_id"]) 
+
+    def get_atk_key():
+        k = SRVCLI_IP
+        if (a["is_srv_attacker"] == 1):
+            k = SRV_IP
+        if (a["is_cli_attacker"] == 1):
+            k = CLI_IP
+        # TODO can this happen?
+        # Note: case not included in k init
+        if (a["is_srv_attacker"] == 1 and a["is_cli_attacker"] == 1):
+            k = SRVCLI_IP
+        return k
+    
+    # We only care about the client in this case
     if (alert_name == "ndpi_ssh_obsolete_client"):
-        return (a["cli_ip"])
+        return CLI_IP
+    
+    # BAT is relevant if it concerns a previously unseen file
+    # The learning phase must be over, otherwise every new transfer
+    # get marked as relevant 
     if (alert_name == "binary_application_transfer"
        and alert_name not in bat_paths
        and LEARNING_PHASE == False):
-        return (a["srv_ip"],a["cli_ip"])
+        return SRVCLI_IP
+    
+    # "ndpi_http_suspicious_content" leads to a +100 score
+    # In case of other simultaneous issues like non-std ports,
+    # or missing user agent, the score gets higher.
+    # We want to seize these scenarios
+    if (alert_name == "ndpi_http_suspicious_content" and a["score"] > 150):
+        return SRVCLI_IP
 
-    key = (a["srv_ip"],a["cli_ip"])
-    if (a["is_srv_attacker"] == 1):
-        key = (a["srv_ip"])
-    if (a["is_cli_attacker"] == 1):
-        key = (a["cli_ip"])
-    if (a["is_srv_attacker"] == 1 and a["is_cli_attacker"] == 1):
-        key = (a["srv_ip"],a["cli_ip"])
-    if (alert_name in RELEVANT_SINGLETON_ALERTS):
+    key = get_atk_key()
+    a_json = json.loads(a["json"])
+
+    # Interested in remote_to_local only when regarding remote access (score = 100),
+    # i.e. Telnet
+    # But there should be some other issues related, so the score should be higher
+    if (alert_name == "remote_to_local_insecure_proto" 
+        and a_json["ndpi_category_name"] == "RemoteAccess"
+        and a["score"] >= 180):
+        return key
+    
+    # When sending clear-text credentials
+    # Consider only hosts which are using previously unseen usernames
+    def get_username():
+        flow_risk_info = json.loads(a_json["alert_generation"]["flow_risk_info"])
+        if ("36" in flow_risk_info
+            and "username" in flow_risk_info["36"]):
+            # Parse 'Found FTP username (USERNAME)'
+            i = flow_risk_info["36"].find('(')
+            return (flow_risk_info["36"][i+1:]
+                    .removesuffix(")"))
+
+        '''
+        Find a way to get info from this
+        {
+          "ntopng.key": XXXXXXXXXX,
+          "hash_entry_id": XXXXXXXXXX,
+          "alert_generation": {
+            "script_key": "ndpi_clear_text_credentials",
+            "subdir": "flow",
+            "flow_risk_info": "{\"36\":\"Found credentials in HTTP Auth Line\"}"
+          },
+          "proto": {
+            "http": {
+              "last_method": "GET",
+              "last_return_code": 200,
+              "last_url": "img/test.png",
+              "last_user_agent": "Mozilla/5.0",
+              "last_server": "Apache (CentOS)",
+              "server_name": "myserver"
+            },
+            "l7_error_code": 200,
+            "confidence": 1
+          }
+        }
+
+        '''
+        return None
+    global clear_text_usernames
+    if (alert_name == "ndpi_clear_text_credentials"
+    and (username := get_username()) 
+    and username not in clear_text_usernames):
+        # add to "known" usernames
+        clear_text_usernames[username] = key
+        # add username to key tuple
+        return key + (username,)
+
+    def get_domain_name():
+        flow_risk_info = json.loads(a_json["alert_generation"]["flow_risk_info"])
+        if ("16" in flow_risk_info):
+            # Parse "flow_risk_info": "{\"16\":\"domain.com\"}"
+            return (flow_risk_info["16"])
+        return None
+    if (alert_name == "ndpi_suspicious_dga_domain"
+        and (domain_name := get_domain_name())
+        and domain_name not in dga_suspicious_domains):
+        # add to "known" domains
+        dga_suspicious_domains[domain_name] = key
+        # add domains to key tuple
+        return key + (domain_name,)
+
+
+    # if (alert_name in RELEVANT_SINGLETON_ALERTS):
+    if (alert_name not in IGNORE_SINGLETON_ALERTS):
         return key
     
     return None
 
 
 
+# GETTERS
 def get_singleton() -> dict:
     # return {k: v for k,v in singleton.items() if v[0] in RELEVANT_SINGLETON_ALERTS}
     return singleton
@@ -447,9 +564,6 @@ def get_higher_alert_types(GRP_CRIT: int):
     # return only keys s.t. n_alerts > mean
     return {x: count for x, count in n_alert_types_per_key.items() if count >= n_alert_types_mean}
 
-tls_alerts = ["tls_certificate_expired","tls_certificate_mismatch","tls_old_protocol_version","tls_unsafe_ciphers"]
-# "tls_certificate_selfsigned"
-
 def get_tls_critical(GRP_CRIT: int):
     if GRP_CRIT not in range(3):
         raise Exception("Invalid grouping criteria")
@@ -512,7 +626,7 @@ def get_periodic(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
 
     # Note: exclude not periodic relevant alerts
-    excludes = tls_alerts + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
+    excludes = TLS_ALERTS + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
 
     THRESHOLD = 0.85
     # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"],v["size"]))
@@ -533,7 +647,7 @@ def get_similar_periodicity(GRP_CRIT:int):
     # periods = { K : (period, CV) }    with K = (IP,VLAN,ALERT_ID)
 
     # Note: exclude not periodic relevant alerts
-    excludes = tls_alerts + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
+    excludes = TLS_ALERTS + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
 
     periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"],v["alert_name"]) for (k, v) in bkt_s.items()
                       if (v["tdiff_CV"] < 1.25 
