@@ -65,8 +65,8 @@ def update_bkts_stats() :
 
 def add_to_bucket(alert, bkt, key):
     # DEBUG print
-    if (alert["alert_id"] == 47 and alert["score"] > 150):
-        print(json.dumps(json.loads(alert["json"]),indent=2))
+    # if (alert["alert_id"] == 28 and alert["score"] > 150):
+    #     print(json.dumps(json.loads(alert["json"]),indent=2))
     try:
         x = bkt[key] # throws KeyError if not existing
         bkt[key].append(alert)
@@ -115,6 +115,7 @@ RELEVANT_SINGLETON_ALERTS = [
     "ndpi_smb_insecure_version",
     "data_exfiltration",
     # "ndpi_suspicious_dga_domain",
+    # "tls_certificate_selfsigned"
     ]
 
 IGNORE_SINGLETON_ALERTS = [
@@ -132,6 +133,7 @@ IGNORE_SINGLETON_ALERTS = [
 
 clear_text_usernames = {}
 dga_suspicious_domains = {}
+tls_self_ja3_tuples = {}
 
 def is_relevant_singleton(a):
     alert_name = get_alert_name(a["json"])
@@ -241,6 +243,26 @@ def is_relevant_singleton(a):
         dga_suspicious_domains[domain_name] = key
         # add domains to key tuple
         return key + (domain_name,)
+
+    # Cert self signed distinct on JA3 hash
+
+
+    def get_ja3_hash():
+        if ("tls" not in a_json["proto"]):
+            return None
+        tls_info = a_json["proto"]["tls"]
+        if ("ja3.server_hash" in tls_info and
+            "ja3.client_hash" in tls_info):
+            # Parse "tls_info": "{\"16\":\"domain.com\"}"
+            return (tls_info["ja3.server_hash"],tls_info["ja3.client_hash"])
+        return None
+    if (alert_name == "tls_certificate_selfsigned"
+        and (ja3_hash := get_ja3_hash())
+        and ja3_hash not in tls_self_ja3_tuples):
+        # add to "known" ja3 hashes
+        tls_self_ja3_tuples[ja3_hash] = key
+        # add domains to key tuple
+        return key + (ja3_hash,)
 
 
     # if (alert_name in RELEVANT_SINGLETON_ALERTS):
