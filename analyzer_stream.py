@@ -29,6 +29,7 @@ from math import log2
 import ast
 import deepdiff
 import dictdiffer
+import utils
 
 
 # Defaults
@@ -105,8 +106,8 @@ try:
 
     prev = {"t_end" : datetime.datetime.now() - datetime.timedelta(minutes=5), "t_start": 0}
     curr = {}
-    prev["sup_level_alerts"] = str_key(get_sup_level_alerts())
-    prev["singleton_alerts"] = str_key(get_singleton_alertview())
+    prev["sup_level_alerts"] = (get_sup_level_alerts())
+    prev["singleton_alerts"] = (get_singleton_alertview())
     while (True):
         now = datetime.datetime.now()
         harvest_bound = datetime.datetime.now() - datetime.timedelta(minutes=5)
@@ -121,15 +122,33 @@ try:
             new_alert(a)
         update_bkts_stats()
         prev_alerts = curr
-        sup_alert = str_key(get_sup_level_alerts())
-        sin_alert = str_key(get_singleton_alertview())
-        curr["sup_level_alerts"] = str_key(get_sup_level_alerts())
-        curr["singleton_alerts"] = str_key(get_singleton_alertview())
+        sup_alert = (get_sup_level_alerts())
+        sin_alert = (get_singleton_alertview())
+        curr["sup_level_alerts"] = (get_sup_level_alerts())
+        curr["singleton_alerts"] = (get_singleton_alertview())
         # # print(json.dumps(curr,indent=2))
         # print(deepdiff.DeepDiff(prev["sup_level_alerts"],sup_alert))
         # print(deepdiff.DeepDiff(prev["singleton_alerts"],sin_alert))
-        diff = deepdiff.DeepDiff(prev,curr,view="tree")
-        print(diff.affected_root_keys)
+        diff = deepdiff.DeepDiff(prev,curr,verbose_level=0)
+        keys = []
+        if ("dictionary_item_added" in diff):
+            keys += (diff["dictionary_item_added"])
+        if ("values_changed" in diff):
+            keys += (diff["values_changed"])
+        
+        alerts_update = []
+        keys_l = list(map(utils.parse_keys_from_path,keys))
+        for k in keys_l:
+            alerts_update.append(str(k) + " : " + str(utils.get_value_from_keys(curr,k)))
+        print(json.dumps(alerts_update,indent=2))
+
+
+        # p = "root['sup_level_alerts']['SRV']['periodic']['('93.62.188.170', 47, 1)']"
+        # p = p.removeprefix("root")
+        # keys = map(lambda x: x.removesuffix("]") p.split("["))
+
+        # print(deepdiff.Delta(diff)._do_dictionary_item_added())
+        # print(deepdiff.Delta(diff)._do_set_item_added())
         # print(json.dumps(list(dictdiffer.diff(prev,curr)), indent=2))
         prev["t_end"] = now
         prev["sup_level_alerts"] = sup_alert
