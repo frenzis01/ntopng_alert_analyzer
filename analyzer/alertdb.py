@@ -18,6 +18,8 @@ bkt_cli = {}
 bkt_srvcli = {}
 
 singleton = {}
+sav = {} # Singleton Alert View
+
 
 bat_paths = {}
 
@@ -92,6 +94,16 @@ def add_bat_path(path):
     else:
         bat_paths[path] = 1
 
+def harvesting(bound: dt.datetime):
+    def to_harvest(alert):
+        return alert["tstamp"] < bound
+    
+    global bkt_srv,bkt_cli,bkt_srvcli
+    bkt_srv = {k:harvested_v for (k,v) in bkt_srv.items() if len(harvested_v := list(filter(to_harvest,v)))}
+    bkt_cli = {k:harvested_v for (k,v) in bkt_cli.items() if len(harvested_v := list(filter(to_harvest,v)))}
+    bkt_srvcli = {k:harvested_v for (k,v) in bkt_srvcli.items() if len(harvested_v := list(filter(to_harvest,v)))}
+    
+
 # GETTERS
 def get_bkt(BKT: int) -> dict:
     if (BKT not in range(3)):
@@ -119,15 +131,20 @@ RELEVANT_SINGLETON_ALERTS = [
     ]
 
 IGNORE_SINGLETON_ALERTS = [
+    # These are not interesting alerts by theirselves
     "blacklisted",
     "ndpi_dns_suspicious_traffic",
     "ndpi_http_suspicious_user_agent",
-    "ndpi_suspicious_dga_domain",
 
+    # These are exported only when matching
+    # more specific criterias
+    "ndpi_http_suspicious_content",
+    "ndpi_suspicious_dga_domain",
     "ndpi_ssh_obsolete_client",
     "binary_application_transfer",
     "ndpi_clear_text_credentials",
     "remote_to_local_insecure_proto",
+    "tls_certificate_selfsigned"
 
 ] + TLS_ALERTS
 
@@ -135,7 +152,18 @@ clear_text_usernames = {}
 dga_suspicious_domains = {}
 tls_self_ja3_tuples = {}
 
+def sav_init_alertnames():
+    sav["ndpi_clear_text_credentials"] = {}
+    sav["ndpi_suspicious_dga_domain"] = {}
+    sav["tls_certificate_selfsigned"] = {}
+    sav["ndpi_ssh_obsolete_client"] = {}
+    sav["binary_application_transfer"] = {}
+    sav["ndpi_http_suspicious_content"] = {}
+    sav["remote_to_local_insecure_proto"] = {}
+    
+
 def is_relevant_singleton(a):
+    global sav
     alert_name = get_alert_name(a["json"])
     
     CLI_IP = (a["cli_ip"],a["vlan_id"])
@@ -156,14 +184,18 @@ def is_relevant_singleton(a):
     
     # We only care about the client in this case
     if (alert_name == "ndpi_ssh_obsolete_client"):
+        # sav[alert_name].append(CLI_IP)
+        addremove_to_singleton(sav[alert_name],CLI_IP)
         return CLI_IP
     
     # BAT is relevant if it concerns a previously unseen file
     # The learning phase must be over, otherwise every new transfer
     # get marked as relevant 
     if (alert_name == "binary_application_transfer"
-       and alert_name not in bat_paths
-       and LEARNING_PHASE == False):
+        and (path := get_BAT_path(a["json"]))
+        and path not in bat_paths
+        and LEARNING_PHASE == False):
+        sav[alert_name][path] = SRVCLI_IP
         return SRVCLI_IP
     
     # "ndpi_http_suspicious_content" leads to a +100 score
@@ -171,6 +203,7 @@ def is_relevant_singleton(a):
     # or missing user agent, the score gets higher.
     # We want to seize these scenarios
     if (alert_name == "ndpi_http_suspicious_content" and a["score"] > 150):
+        addremove_to_singleton(sav[alert_name],SRVCLI_IP)
         return SRVCLI_IP
 
     key = get_atk_key()
@@ -182,6 +215,7 @@ def is_relevant_singleton(a):
     if (alert_name == "remote_to_local_insecure_proto" 
         and a_json["ndpi_category_name"] == "RemoteAccess"
         and a["score"] >= 180):
+        addremove_to_singleton(sav[alert_name],key)
         return key
     
     # When sending clear-text credentials
@@ -194,37 +228,20 @@ def is_relevant_singleton(a):
             i = flow_risk_info["36"].find('(')
             return (flow_risk_info["36"][i+1:]
                     .removesuffix(")"))
-
         '''
-        Find a way to get info from this
-        {
-          "ntopng.key": XXXXXXXXXX,
-          "hash_entry_id": XXXXXXXXXX,
-          "alert_generation": {
-            "script_key": "ndpi_clear_text_credentials",
-            "subdir": "flow",
-            "flow_risk_info": "{\"36\":\"Found credentials in HTTP Auth Line\"}"
-          },
-          "proto": {
-            "http": {
-              "last_method": "GET",
-              "last_return_code": 200,
-              "last_url": "img/test.png",
-              "last_user_agent": "Mozilla/5.0",
-              "last_server": "Apache (CentOS)",
-              "server_name": "myserver"
-            },
-            "l7_error_code": 200,
-            "confidence": 1
-          }
-        }
-
+        TODO
+        Find a way to retrieve info when
+        "flow_risk_info": "{\"36\":\"Found credentials in HTTP Auth Line\"}"
         '''
         return None
     global clear_text_usernames
     if (alert_name == "ndpi_clear_text_credentials"
-    and (username := get_username()) 
-    and username not in clear_text_usernames):
+    and (username := get_username()) ):
+    # and username not in clear_text_usernames):
+        if (username not in sav[alert_name]):
+            sav[alert_name][username] = {}
+        sav[alert_name][username][key] = 1
+        # sav[alert_name][username] = (sav[alert_name][username][key] if (username in sav[alert_name]) else [key])
         # add to "known" usernames
         clear_text_usernames[username] = key
         # add username to key tuple
@@ -237,8 +254,12 @@ def is_relevant_singleton(a):
             return (flow_risk_info["16"])
         return None
     if (alert_name == "ndpi_suspicious_dga_domain"
-        and (domain_name := get_domain_name())
-        and domain_name not in dga_suspicious_domains):
+        and (domain_name := get_domain_name()) ):
+        # and domain_name not in dga_suspicious_domains):
+        if (domain_name not in sav[alert_name]):
+            sav[alert_name][domain_name] = {}
+        sav[alert_name][domain_name][key] = 1
+        # sav[alert_name][domain_name] = (sav[alert_name][domain_name][key] if (domain_name in sav[alert_name]) else [key])
         # add to "known" domains
         dga_suspicious_domains[domain_name] = key
         # add domains to key tuple
@@ -257,8 +278,13 @@ def is_relevant_singleton(a):
             return (tls_info["ja3.server_hash"],tls_info["ja3.client_hash"])
         return None
     if (alert_name == "tls_certificate_selfsigned"
-        and (ja3_hash := get_ja3_hash())
-        and ja3_hash not in tls_self_ja3_tuples):
+        and (ja3_hash := get_ja3_hash()) ):
+        # and ja3_hash not in tls_self_ja3_tuples):
+        key = SRV_IP
+        if (ja3_hash not in sav[alert_name]):
+            sav[alert_name][ja3_hash] = {}
+        sav[alert_name][ja3_hash][key] = 1
+        # sav[alert_name][ja3_hash] = (sav[alert_name][ja3_hash][key] if (ja3_hash in sav[alert_name]) else [key])
         # add to "known" ja3 hashes
         tls_self_ja3_tuples[ja3_hash] = key
         # add domains to key tuple
@@ -267,7 +293,12 @@ def is_relevant_singleton(a):
 
     # if (alert_name in RELEVANT_SINGLETON_ALERTS):
     if (alert_name not in IGNORE_SINGLETON_ALERTS):
-        return key
+        if (alert_name not in sav):
+            sav[alert_name] = {}
+        # check if the key was already present
+        # if yes, it is not a singleton
+        addremove_to_singleton(sav[alert_name],key)
+
     
     return None
 
@@ -277,6 +308,13 @@ def is_relevant_singleton(a):
 def get_singleton() -> dict:
     # return {k: v for k,v in singleton.items() if v[0] in RELEVANT_SINGLETON_ALERTS}
     return singleton
+
+def get_singleton_alertview() -> dict:
+    return {k: (str_key(v) if (type(v) is dict)
+                else (str_val(v) if (type(v) is list)
+                else v))
+                
+                for k, v in sav.items()}
 
 def get_bkt_stats(BKT: int) -> dict:
     if (BKT not in range(3)):
@@ -300,9 +338,6 @@ def map_id_to_name(GRP_CRIT:int):
 
 
 def get_sup_level_alerts() -> dict:
-    # Needed because json.dumps doesn't accept tuples as keys
-    def str_key(d:dict):
-        return {str(k): v for (k,v) in d.items()}
     
     sup_level_alerts = {}
     for grp_crit in [GRP_SRV,GRP_CLI,GRP_SRVCLI]:
@@ -374,6 +409,37 @@ def remove_unwanted_fields(a):
     a.pop("cli_host_pool_id", None)
     a.pop("srv_host_pool_id", None)
 
+
+# Other utilities
+def get_BAT_path(x):
+    o = json.loads(x)
+    try:
+        # add bat_paths
+        path = o["last_url"]
+        bat_paths[path] = 1
+        return path
+    except KeyError:
+        return ""
+
+# Needed because json.dumps doesn't accept tuples as keys
+
+def str_key(d: dict):
+    return {str(k): (str_val(v) if (type(v) is list)
+                     else (
+                        str_key(v) if (type(v) is dict) else
+                        (str(v) if (type(v) is tuple)
+                           else v)))
+            for (k, v) in d.items()}
+
+def str_val(d:list):
+    return list(map(str,d))
+
+def addremove_to_singleton(a: dict, v):
+    if (v in a):
+        a.pop(v,None)
+        return
+    # else
+    a[v] = 1
 
 # Stats calculation
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
@@ -484,15 +550,6 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     # BAT Binary Application Transfer -> Check if same file
     # TODO optimize update on new alert
     d["bft_same_file"] = ""
-    def get_BAT_path(x):
-        o = json.loads(x)
-        try:
-            # add bat_paths
-            path = o["last_url"]
-            bat_paths[path] = 1
-            return path
-        except KeyError:
-            return ""
 
     if (s[0]["alert_id"] == 29):
         # get the first path
@@ -813,3 +870,6 @@ def str_to_timedelta(s: str) -> dt.timedelta:
     d = dt.datetime.strptime(s, "%H:%M:%S")
     total_sec = d.hour*3600 + d.minute*60 + d.second  # total seconds calculation
     return dt.timedelta(seconds=total_sec)
+
+
+sav_init_alertnames()
