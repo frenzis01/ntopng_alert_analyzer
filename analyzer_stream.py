@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+
+# ntopng related imports
+import os
+import sys
+import getopt
+import time
+import ipaddress
+import struct
+import socket
+
+from ntopng.ntopng import Ntopng
+from ntopng.interface import Interface
+from ntopng.host import Host
+from ntopng.historical import Historical
+from ntopng.flow import Flow
+
+# My imports
+import datetime
+import json
+import pandas as pd
+from types import SimpleNamespace
+import myenv
+from IPython.display import display
+import math
+from scipy.stats import entropy
+from collections import Counter
+from math import log2
+import ast
+import deepdiff
+import dictdiffer
+
+
+# Defaults
+username = myenv.myusr
+password = myenv.mykey
+ntopng_url = myenv.myurl
+iface_id = 12  # 12 = all
+auth_token = None
+enable_debug = False
+host_ip = "192.168.1.1"  # useful only for -H option
+
+##########
+
+
+def usage():
+    print("test.py [-h] [-d] [-u <username>] [-p <passwrd>] [-n <ntopng_url>]")
+    print("         [-i <iface id>] [-t <auth token>]")
+    print("")
+    print("Example: ./test.py -t ce0e284c774fac5a3e981152d325cfae -i 4")
+    print("         ./test.py -u ntop -p mypassword -i 4")
+    sys.exit(0)
+
+##########
+
+
+try:
+    opts, args = getopt.getopt(sys.argv[1:],
+                               "hdu:p:n:i:H:t:",
+                               ["help",
+                                "debug",
+                                "username=",
+                                "password=",
+                                "ntopng_url=",
+                                "iface_id=",
+                                "host_ip=",
+                                "auth_token="]
+                               )
+except getopt.GetoptError as err:
+    print(err)
+    usage()
+    sys.exit(2)
+
+for o, v in opts:
+    if (o in ("-h", "--help")):
+        usage()
+    elif (o in ("-d", "--debug")):
+        enable_debug = True
+    elif (o in ("-u", "--username")):
+        username = v
+    elif (o in ("-p", "--password")):
+        password = v
+    elif (o in ("-n", "--ntopng_url")):
+        ntopng_url = v
+    elif (o in ("-i", "--iface_id")):
+        iface_id = v
+    elif (o in ("-H", "--host_ip")):
+        host_ip = v
+    elif (o in ("-t", "--auth_token")):
+        auth_token = v
+
+try:
+    my_ntopng = Ntopng(username, password, auth_token, ntopng_url)
+
+    if (enable_debug):
+        my_ntopng.enable_debug()
+except ValueError as e:
+    print(e)
+    os._exit(-1)
+
+a = {
+    "A" : {
+        "D" : [2,4],
+        "E" : [3,4,5]
+    },
+    "B" : {
+        "D" : [2,5],
+        "F" : [1],
+        "G" : []
+    }
+}
+
+b = {
+    "A" : {
+        "D" : [2,4],
+        "E" : [3,4,7]
+    },
+    "B" : {
+        "D" : [2,5],
+        "F" : [],
+        "G" : [7,8]
+    },
+    "C" : []
+}
+
+print(deepdiff.DeepDiff(a,b))
+
+
+try:
+    # from analyzer.alertdb import *
+    from analyzer.alertdb import *
+
+    prev = {"t_end" : datetime.datetime.now() - datetime.timedelta(minutes=5), "t_start": 0}
+    curr = {}
+    prev["sup_level_alerts"] = str_key(get_sup_level_alerts())
+    prev["singleton_alerts"] = str_key(get_singleton_alertview())
+    while (True):
+        now = datetime.datetime.now()
+        harvest_bound = datetime.datetime.now() - datetime.timedelta(minutes=5)
+        curr["t_start"] = prev["t_end"].strftime("%H:%M:%S")
+        curr["t_end"] = now.strftime("%H:%M:%S")
+        my_historical = Historical(my_ntopng)
+        # print("\tSending request "  + last15minutes.strftime("%H:%M:%S") + " --> " + datetime.datetime.now().strftime("%H:%M:%S") )
+        raw_alerts = my_historical.get_flow_alerts(iface_id, prev["t_end"].strftime('%s'), now.strftime(
+            '%s'), "*", "severity = 5", 10000, "", "")
+        harvesting(prev["t_end"])
+        for a in raw_alerts:
+            new_alert(a)
+        update_bkts_stats()
+        prev_alerts = curr
+        sup_alert = str_key(get_sup_level_alerts())
+        sin_alert = str_key(get_singleton_alertview())
+        curr["sup_level_alerts"] = str_key(get_sup_level_alerts())
+        curr["singleton_alerts"] = str_key(get_singleton_alertview())
+        # # print(json.dumps(curr,indent=2))
+        # print(deepdiff.DeepDiff(prev["sup_level_alerts"],sup_alert))
+        # print(deepdiff.DeepDiff(prev["singleton_alerts"],sin_alert))
+        diff = deepdiff.DeepDiff(prev,curr,view="tree")
+        print(diff)
+        # print(json.dumps(list(dictdiffer.diff(prev,curr)), indent=2))
+        prev["t_end"] = now
+        prev["sup_level_alerts"] = sup_alert
+        prev["singleton_alerts"] = sin_alert
+        time.sleep(60)
+
+    
+
+except ValueError as e:
+    print(e)
+    os._exit(-1)
+
+
+# print("\tHandling alerts")
+
+# print(json.dumps(get_sup_level_alerts(),indent=2))
+def str_key(d:dict):
+        return {str(k): v for (k,v) in d.items()}
+# print(json.dumps(str_key(get_singleton()),indent=2))
+print(json.dumps(str_key(get_singleton_alertview()),indent=2))
