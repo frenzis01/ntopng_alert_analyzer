@@ -98,33 +98,6 @@ except ValueError as e:
     print(e)
     os._exit(-1)
 
-a = {
-    "A" : {
-        "D" : [2,4],
-        "E" : [3,4,5]
-    },
-    "B" : {
-        "D" : [2,5],
-        "F" : [1],
-        "G" : []
-    }
-}
-
-b = {
-    "A" : {
-        "D" : [2,4],
-        "E" : [3,4,7]
-    },
-    "B" : {
-        "D" : [2,5],
-        "F" : [],
-        "G" : [7,8]
-    },
-    "C" : []
-}
-
-print(deepdiff.DeepDiff(a,b))
-
 
 try:
     # from analyzer.alertdb import *
@@ -156,12 +129,12 @@ try:
         # print(deepdiff.DeepDiff(prev["sup_level_alerts"],sup_alert))
         # print(deepdiff.DeepDiff(prev["singleton_alerts"],sin_alert))
         diff = deepdiff.DeepDiff(prev,curr,view="tree")
-        print(diff)
+        print(diff.affected_root_keys)
         # print(json.dumps(list(dictdiffer.diff(prev,curr)), indent=2))
         prev["t_end"] = now
         prev["sup_level_alerts"] = sup_alert
         prev["singleton_alerts"] = sin_alert
-        time.sleep(60)
+        time.sleep(10)
 
     
 
