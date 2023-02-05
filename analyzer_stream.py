@@ -104,13 +104,13 @@ try:
     # from analyzer.alertdb import *
     from analyzer.alertdb import *
 
-    prev = {"t_end" : datetime.datetime.now() - datetime.timedelta(minutes=5), "t_start": 0}
+    prev = {"t_end" : datetime.datetime.now() - datetime.timedelta(minutes=5),"t_start" : datetime.datetime.now()}
     curr = {}
     prev["sup_level_alerts"] = (get_sup_level_alerts())
     prev["singleton_alerts"] = (get_singleton_alertview())
     while (True):
         now = datetime.datetime.now()
-        harvest_bound = datetime.datetime.now() - datetime.timedelta(minutes=5)
+        harvest_bound = datetime.datetime.now() - datetime.timedelta(minutes=30)
         curr["t_start"] = prev["t_end"].strftime("%H:%M:%S")
         curr["t_end"] = now.strftime("%H:%M:%S")
         my_historical = Historical(my_ntopng)
@@ -129,7 +129,9 @@ try:
         # # print(json.dumps(curr,indent=2))
         # print(deepdiff.DeepDiff(prev["sup_level_alerts"],sup_alert))
         # print(deepdiff.DeepDiff(prev["singleton_alerts"],sin_alert))
+        prev["t_end"] = prev["t_end"].strftime("%H:%M:%S")
         diff = deepdiff.DeepDiff(prev,curr,verbose_level=0)
+        # print(diff)
         keys = []
         if ("dictionary_item_added" in diff):
             keys += (diff["dictionary_item_added"])
@@ -140,32 +142,20 @@ try:
         keys_l = list(map(utils.parse_keys_from_path,keys))
         for k in keys_l:
             alerts_update.append(str(k) + " : " + str(utils.get_value_from_keys(curr,k)))
+        
+        if len(alerts_update):
+            alerts_update.insert("'t_start' : " + curr["t_start"])
+            alerts_update.insert("'t_end' : " + curr["t_end"])
+
         print(json.dumps(alerts_update,indent=2))
 
-
-        # p = "root['sup_level_alerts']['SRV']['periodic']['('93.62.188.170', 47, 1)']"
-        # p = p.removeprefix("root")
-        # keys = map(lambda x: x.removesuffix("]") p.split("["))
-
-        # print(deepdiff.Delta(diff)._do_dictionary_item_added())
-        # print(deepdiff.Delta(diff)._do_set_item_added())
-        # print(json.dumps(list(dictdiffer.diff(prev,curr)), indent=2))
         prev["t_end"] = now
         prev["sup_level_alerts"] = sup_alert
         prev["singleton_alerts"] = sin_alert
-        time.sleep(10)
+        time.sleep(60)
 
     
 
 except ValueError as e:
     print(e)
     os._exit(-1)
-
-
-# print("\tHandling alerts")
-
-# print(json.dumps(get_sup_level_alerts(),indent=2))
-def str_key(d:dict):
-        return {str(k): v for (k,v) in d.items()}
-# print(json.dumps(str_key(get_singleton()),indent=2))
-print(json.dumps(str_key(get_singleton_alertview()),indent=2))
