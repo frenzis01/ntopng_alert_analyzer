@@ -125,42 +125,40 @@ try:
         prev_alerts = curr
         sup_alert = (get_sup_level_alerts())
         sin_alert = (get_singleton_alertview())
-        sec_alert = (get_secondary_groupings())
+        # sec_alert = (get_secondary_groupings())
         curr["sup_level_alerts"] = (get_sup_level_alerts())
-        curr["secondary_groupings"] = (get_secondary_groupings())
+        # curr["secondary_groupings"] = (get_secondary_groupings())
         curr["singleton_alerts"] = (get_singleton_alertview())
-        # # print(json.dumps(curr,indent=2))
-        # print(deepdiff.DeepDiff(prev["sup_level_alerts"],sup_alert))
-        # print(deepdiff.DeepDiff(prev["singleton_alerts"],sin_alert))
         prev["t_end"] = prev["t_end"].strftime("%H:%M:%S")
         diff = deepdiff.DeepDiff(prev,curr,verbose_level=0)
-        print(diff)
+        # print(diff)
         keys = []
         if ("dictionary_item_added" in diff):
             keys += (diff["dictionary_item_added"])
         if ("values_changed" in diff):
             keys += (diff["values_changed"])
         
-        alerts_update = []
+        alerts_update = {}
         keys_l = list(map(utils.parse_keys_from_path,keys))
-        print(keys_l)
+        # print(keys_l)
+        if len(keys_l):
+            alerts_update['t_start'] = curr["t_start"]
+            alerts_update['t_end'] = curr["t_end"]
         for k in keys_l:
-            # if type(val := str(utils.get_value_from_keys(curr,k))) is dict:
-            #     str_key(val)
-            # else
-            #     str
-            val = str(utils.get_value_from_keys(curr,list(k)))
-            alerts_update.append(str(k) + " : " + val)
+            # if type(val := utils.get_value_from_keys(curr,list(k))) is not dict:
+                # print("DICT!" + str(k))
+                # print(json.dumps(val,indent=2))
+            # else:
+                # str(val)
+            val = utils.get_value_from_keys(curr,list(k))
+            alerts_update[str(k)] = val
         
-        if len(alerts_update):
-            alerts_update.insert(0,"'t_start' : " + curr["t_start"])
-            alerts_update.insert(1,"'t_end' : " + curr["t_end"])
 
         print(json.dumps(alerts_update,indent=2))
 
         prev["t_end"] = now
         prev["sup_level_alerts"] = sup_alert
-        prev["secondary_groupings"] = sec_alert
+        # prev["secondary_groupings"] = sec_alert
         prev["singleton_alerts"] = sin_alert
         time.sleep(60)
 
