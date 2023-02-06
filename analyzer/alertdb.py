@@ -19,6 +19,7 @@ bkt_srvcli = {}
 
 singleton = {}
 sav = {} # Singleton Alert View
+snd_grp = {} # Secondary groupings
 
 
 bat_paths = {}
@@ -152,18 +153,18 @@ clear_text_usernames = {}
 dga_suspicious_domains = {}
 tls_self_ja3_tuples = {}
 
-def sav_init_alertnames():
-    sav["ndpi_clear_text_credentials"] = {}
-    sav["ndpi_suspicious_dga_domain"] = {}
-    sav["tls_certificate_selfsigned"] = {}
+def dict_init_alertnames():
     sav["ndpi_ssh_obsolete_client"] = {}
-    sav["binary_application_transfer"] = {}
     sav["ndpi_http_suspicious_content"] = {}
     sav["remote_to_local_insecure_proto"] = {}
+    sav["binary_application_transfer"] = {}
+    snd_grp["ndpi_clear_text_credentials"] = {}
+    snd_grp["ndpi_suspicious_dga_domain"] = {}
+    snd_grp["tls_certificate_selfsigned"] = {}
     
 
 def is_relevant_singleton(a):
-    global sav
+    global sav,snd_grp
     alert_name = get_alert_name(a["json"])
     
     CLI_IP = (a["cli_ip"],a["vlan_id"])
@@ -238,10 +239,10 @@ def is_relevant_singleton(a):
     if (alert_name == "ndpi_clear_text_credentials"
     and (username := get_username()) ):
     # and username not in clear_text_usernames):
-        if (username not in sav[alert_name]):
-            sav[alert_name][username] = {}
-        sav[alert_name][username][key] = 1
-        # sav[alert_name][username] = (sav[alert_name][username][key] if (username in sav[alert_name]) else [key])
+        if (username not in snd_grp[alert_name]):
+            snd_grp[alert_name][username] = {}
+        snd_grp[alert_name][username][key] = 1
+        # snd_grp[alert_name][username] = (snd_grp[alert_name][username][key] if (username in snd_grp[alert_name]) else [key])
         # add to "known" usernames
         clear_text_usernames[username] = key
         # add username to key tuple
@@ -256,10 +257,10 @@ def is_relevant_singleton(a):
     if (alert_name == "ndpi_suspicious_dga_domain"
         and (domain_name := get_domain_name()) ):
         # and domain_name not in dga_suspicious_domains):
-        if (domain_name not in sav[alert_name]):
-            sav[alert_name][domain_name] = {}
-        sav[alert_name][domain_name][key] = 1
-        # sav[alert_name][domain_name] = (sav[alert_name][domain_name][key] if (domain_name in sav[alert_name]) else [key])
+        if (domain_name not in snd_grp[alert_name]):
+            snd_grp[alert_name][domain_name] = {}
+        snd_grp[alert_name][domain_name][key] = 1
+        # snd_grp[alert_name][domain_name] = (snd_grp[alert_name][domain_name][key] if (domain_name in snd_grp[alert_name]) else [key])
         # add to "known" domains
         dga_suspicious_domains[domain_name] = key
         # add domains to key tuple
@@ -281,10 +282,10 @@ def is_relevant_singleton(a):
         and (ja3_hash := get_ja3_hash()) ):
         # and ja3_hash not in tls_self_ja3_tuples):
         key = SRV_IP
-        if (ja3_hash not in sav[alert_name]):
-            sav[alert_name][ja3_hash] = {}
-        sav[alert_name][ja3_hash][key] = 1
-        # sav[alert_name][ja3_hash] = (sav[alert_name][ja3_hash][key] if (ja3_hash in sav[alert_name]) else [key])
+        if (ja3_hash not in snd_grp[alert_name]):
+            snd_grp[alert_name][ja3_hash] = {}
+        snd_grp[alert_name][ja3_hash][key] = 1
+        # snd_grp[alert_name][ja3_hash] = (snd_grp[alert_name][ja3_hash][key] if (ja3_hash in snd_grp[alert_name]) else [key])
         # add to "known" ja3 hashes
         tls_self_ja3_tuples[ja3_hash] = key
         # add domains to key tuple
@@ -315,6 +316,13 @@ def get_singleton_alertview() -> dict:
                 else v))
                 
                 for k, v in sav.items()}
+
+def get_secondary_groupings() -> dict:
+    return {k: (str_key(v) if (type(v) is dict)
+                else (str_val(v) if (type(v) is list)
+                else v))
+                
+                for k, v in snd_grp.items()}
 
 def get_bkt_stats(BKT: int) -> dict:
     if (BKT not in range(3)):
@@ -872,4 +880,4 @@ def str_to_timedelta(s: str) -> dt.timedelta:
     return dt.timedelta(seconds=total_sec)
 
 
-sav_init_alertnames()
+dict_init_alertnames()
