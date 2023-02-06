@@ -502,6 +502,13 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     d["srv_port_S"] = shannon_entropy(list(map(lambda x: x["srv_port"],s)))
     d["cli_port_S"] = shannon_entropy(list(map(lambda x: x["cli_port"],s)))
 
+    # In case of SRV | CLI
+    # If the other peer is always the same, this grouping will be found in SRVCLI
+    # Thus, there is no reason to duplicate the info here
+    if ((GRP_CRIT == GRP_SRV and d["cli_ip_S"] == 0.0)
+        or (GRP_CRIT == GRP_CLI and d["srv_ip_S"] == 0.0)):
+        return None
+
     d["srv_attacker"] = sum(map(lambda x: x["is_srv_attacker"],s))/s_size
     d["cli_attacker"] = sum(map(lambda x: x["is_cli_attacker"],s))/s_size
 
