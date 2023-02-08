@@ -50,9 +50,11 @@ def new_alert(a):
 
     # add to buckets (i.e. groups)
     global bkt_srv,bkt_cli,bkt_srvcli # use global reference
-    bkt_srv = add_to_bucket(a,bkt_srv,(a["srv_ip"], a["vlan_id"], a["alert_id"]))
-    bkt_cli = add_to_bucket(a,bkt_cli,(a["cli_ip"], a["vlan_id"], a["alert_id"]))
-    bkt_srvcli = add_to_bucket(a,bkt_srvcli,(a["srv_ip"],a["cli_ip"], a["vlan_id"], a["alert_id"]))
+    SRV_ID = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
+    CLI_ID = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
+    bkt_srv = add_to_bucket(a,bkt_srv,(SRV_ID, a["vlan_id"], a["alert_id"]))
+    bkt_cli = add_to_bucket(a,bkt_cli,(CLI_ID, a["vlan_id"], a["alert_id"]))
+    bkt_srvcli = add_to_bucket(a,bkt_srvcli,(SRV_ID,CLI_ID, a["vlan_id"], a["alert_id"]))
 
     # add to singleton groups
     global singleton
@@ -170,27 +172,31 @@ def is_relevant_singleton(a):
     global sav,snd_grp
     alert_name = get_alert_name(a["json"])
     
-    CLI_IP = (a["cli_ip"],a["vlan_id"])
-    SRV_IP = (a["srv_ip"],a["vlan_id"])
-    SRVCLI_IP = (a["srv_ip"],a["cli_ip"],a["vlan_id"]) 
+    CLI_ID = (a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"],
+              a["vlan_id"])
+    SRV_ID = (a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"],
+              a["vlan_id"])
+    SRVCLI_ID = (a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"],
+                 a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"],
+                 a["vlan_id"])
 
     def get_atk_key():
-        k = SRVCLI_IP
+        k = SRVCLI_ID
         if (a["is_srv_attacker"] == 1):
-            k = SRV_IP
+            k = SRV_ID
         if (a["is_cli_attacker"] == 1):
-            k = CLI_IP
+            k = CLI_ID
         # TODO can this happen?
         # Note: case not included in k init
         if (a["is_srv_attacker"] == 1 and a["is_cli_attacker"] == 1):
-            k = SRVCLI_IP
+            k = SRVCLI_ID
         return k
     
     # We only care about the client in this case
     if (alert_name == "ndpi_ssh_obsolete_client"):
-        # sav[alert_name].append(CLI_IP)
-        addremove_to_singleton(sav[alert_name],CLI_IP)
-        return CLI_IP
+        # sav[alert_name].append(CLI_ID)
+        addremove_to_singleton(sav[alert_name],CLI_ID)
+        return CLI_ID
     
     # BAT is relevant if it concerns a previously unseen file
     # The learning phase must be over, otherwise every new transfer
@@ -199,16 +205,16 @@ def is_relevant_singleton(a):
         and (path := get_BAT_path(a["json"]))
         and path not in bat_paths
         and LEARNING_PHASE == False):
-        sav[alert_name][path] = SRVCLI_IP
-        return SRVCLI_IP
+        sav[alert_name][path] = SRVCLI_ID
+        return SRVCLI_ID
     
     # "ndpi_http_suspicious_content" leads to a +100 score
     # In case of other simultaneous issues like non-std ports,
     # or missing user agent, the score gets higher.
     # We want to seize these scenarios
     if (alert_name == "ndpi_http_suspicious_content" and a["score"] > 150):
-        addremove_to_singleton(sav[alert_name],SRVCLI_IP)
-        return SRVCLI_IP
+        addremove_to_singleton(sav[alert_name],SRVCLI_ID)
+        return SRVCLI_ID
 
     key = get_atk_key()
     a_json = json.loads(a["json"])
@@ -284,7 +290,7 @@ def is_relevant_singleton(a):
     if (alert_name == "tls_certificate_selfsigned"
         and (ja3_hash := get_ja3_hash()) ):
         # and ja3_hash not in tls_self_ja3_tuples):
-        key = SRV_IP
+        key = SRV_ID
         if (ja3_hash not in snd_grp[alert_name]):
             snd_grp[alert_name][ja3_hash] = {}
         snd_grp[alert_name][ja3_hash][key] = 1
