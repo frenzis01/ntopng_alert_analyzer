@@ -9,7 +9,7 @@ import numpy as np
 import datetime as dt
 import itertools
 import re
-import utils
+import utils as u
 
 STREAMING_MODE = False
 LEARNING_PHASE = True
@@ -33,7 +33,8 @@ GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
 
 def to_be_ignored(a):
     EXCLUDED_VLAN = ["9","24","53","57","58","203"]
-    EXCLUDED_ALERTIDS = ["91"] # 91:vlan_bidirectional_traffic
+    EXCLUDED_ALERTIDS = ["91",  # vlan_bidirectional_traffic
+                         "75"]  # connection_failed : Warning TCP Connection failed
     if (a["vlan_id"] in EXCLUDED_VLAN or
         a["alert_id"] in EXCLUDED_ALERTIDS):
         return True
@@ -195,14 +196,14 @@ def is_relevant_singleton(a):
     # We only care about the client in this case
     if (alert_name == "ndpi_ssh_obsolete_client"):
         # sav[alert_name].append(CLI_ID)
-        addremove_to_singleton(sav[alert_name],CLI_ID)
+        u.addremove_to_singleton(sav[alert_name],CLI_ID)
         return CLI_ID
     
     # BAT is relevant if it concerns a previously unseen file
     # The learning phase must be over, otherwise every new transfer
     # get marked as relevant 
     if (alert_name == "binary_application_transfer"
-        and (path := get_BAT_path(a["json"]))
+        and (path := u.get_BAT_path(a["json"]))
         and path not in bat_paths
         and LEARNING_PHASE == False):
         sav[alert_name][path] = SRVCLI_ID
@@ -213,7 +214,7 @@ def is_relevant_singleton(a):
     # or missing user agent, the score gets higher.
     # We want to seize these scenarios
     if (alert_name == "ndpi_http_suspicious_content" and a["score"] > 150):
-        addremove_to_singleton(sav[alert_name],SRVCLI_ID)
+        u.addremove_to_singleton(sav[alert_name],SRVCLI_ID)
         return SRVCLI_ID
 
     key = get_atk_key()
@@ -225,7 +226,7 @@ def is_relevant_singleton(a):
     if (alert_name == "remote_to_local_insecure_proto" 
         and a_json["ndpi_category_name"] == "RemoteAccess"
         and a["score"] >= 180):
-        addremove_to_singleton(sav[alert_name],key)
+        u.addremove_to_singleton(sav[alert_name],key)
         return key
     
     # When sending clear-text credentials
@@ -307,7 +308,7 @@ def is_relevant_singleton(a):
             sav[alert_name] = {}
         # check if the key was already present
         # if yes, it is not a singleton
-        addremove_to_singleton(sav[alert_name],key)
+        u.addremove_to_singleton(sav[alert_name],key)
 
     
     return None
@@ -320,15 +321,15 @@ def get_singleton() -> dict:
     return singleton
 
 def get_singleton_alertview() -> dict:
-    return {k: (str_key(v) if (type(v) is dict)
-                else (str_val(v) if (type(v) is list)
+    return {k: (u.str_key(v) if (type(v) is dict)
+                else (u.str_val(v) if (type(v) is list)
                 else v))
                 
                 for k, v in sav.items()}
 
 def get_secondary_groupings() -> dict:
-    return {k: (str_key(v) if (type(v) is dict)
-                else (str_val(v) if (type(v) is list)
+    return {k: (u.str_key(v) if (type(v) is dict)
+                else (u.str_val(v) if (type(v) is list)
                 else v))
                 
                 for k, v in snd_grp.items()}
@@ -359,15 +360,15 @@ def get_sup_level_alerts() -> dict:
     sup_level_alerts = {}
     for grp_crit in [GRP_SRV,GRP_CLI,GRP_SRVCLI]:
         sup_level_alerts[map_id_to_name(grp_crit)] = {
-            "higher_alert_types" : str_key(get_higher_alert_types(grp_crit)),
-            "tls_critical" : str_key(get_tls_critical(grp_crit)),
-            "cs_paradigm_odd" : str_key(get_cs_paradigm_odd(grp_crit)),
-            "blk_peer" : str_key(get_blk_peer(grp_crit)),
-            "simultaneous" : str_key(get_simultaneous(grp_crit)),
-            "periodic" : str_key(get_periodic(grp_crit)),
+            "higher_alert_types" : u.str_key(get_higher_alert_types(grp_crit)),
+            "tls_critical" : u.str_key(get_tls_critical(grp_crit)),
+            "cs_paradigm_odd" : u.str_key(get_cs_paradigm_odd(grp_crit)),
+            "blk_peer" : u.str_key(get_blk_peer(grp_crit)),
+            "simultaneous" : u.str_key(get_simultaneous(grp_crit)),
+            "periodic" : u.str_key(get_periodic(grp_crit)),
             "similar_periodicity" : get_similar_periodicity(grp_crit),
-            "bat_samefile" : str_key(get_bat_samefile(grp_crit)),
-            "missingUA" : str_key(get_missingUA(grp_crit)),
+            "bat_samefile" : u.str_key(get_bat_samefile(grp_crit)),
+            "missingUA" : u.str_key(get_missingUA(grp_crit)),
         }
     return sup_level_alerts
 
@@ -427,36 +428,7 @@ def remove_unwanted_fields(a):
     a.pop("srv_host_pool_id", None)
 
 
-# Other utilities
-def get_BAT_path(x):
-    o = json.loads(x)
-    try:
-        # add bat_paths
-        path = o["last_url"]
-        bat_paths[path] = 1
-        return path
-    except KeyError:
-        return ""
 
-# Needed because json.dumps doesn't accept tuples as keys
-
-def str_key(d: dict):
-    return {str(k): (str_val(v) if (type(v) is list)
-                     else (
-                        str_key(v) if (type(v) is dict) else
-                        (str(v) if (type(v) is tuple)
-                           else v)))
-            for (k, v) in d.items()}
-
-def str_val(d:list):
-    return list(map(str,d))
-
-def addremove_to_singleton(a: dict, v):
-    if (v in a):
-        a.pop(v,None)
-        return
-    # else
-    a[v] = 1
 
 # Stats calculation
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
@@ -485,7 +457,11 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     # ENTROPY (S)
     # Convert IP to int first, then compute entropy
     def ip_to_numeric(x):
-        return struct.unpack("!I", socket.inet_aton(x))[0]
+        try:
+            return struct.unpack("!I", socket.inet_aton(x))[0]
+        except:
+            print(x)
+            return 0
     srv_ip_toN = list(map(ip_to_numeric,map(lambda x: x["srv_ip"],s)))
     cli_ip_toN = list(map(ip_to_numeric,map(lambda x: x["cli_ip"],s)))
     
@@ -577,9 +553,10 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
 
     if (s[0]["alert_id"] == 29):
         # get the first path
-        first_path = get_BAT_path(s[0]["json"])
+        first_path = u.get_BAT_path(s[0]["json"])
         if first_path != "":
-            for p in map(get_BAT_path,map(lambda x: x["json"],s)):
+            bat_paths[first_path] = 1
+            for p in map(u.get_BAT_path,map(lambda x: x["json"],s)):
                 if p != first_path:
                     first_path = ""
                     break
@@ -701,14 +678,14 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
         if (GRP_CRIT != GRP_CLI 
             and x["alert_name"] not in excludes
             and x["srv_port_S"] >= PORT_S_TH
-            and utils.is_server(vlan_id)):
+            and u.is_server(vlan_id)):
             return "odd_server"
         # A client is odd if uses the SAME port with MANY servers
         if (GRP_CRIT != GRP_SRV 
             and x["alert_name"] not in excludes
             and x["cli_port_S"] <= PORT_S_TH
             and x["srv_ip_S"] >= IP_S_TH
-            and utils.is_client(vlan_id)):
+            and u.is_client(vlan_id)):
             return "odd_client"
         return None
     
@@ -735,7 +712,7 @@ def get_periodic(GRP_CRIT:int):
     # Note: exclude not periodic relevant alerts
     excludes = TLS_ALERTS + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
 
-    THRESHOLD = 0.85
+    THRESHOLD = 0.8
     # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"],v["size"]))
     return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k, v) in bkt_s.items()
             if v["tdiff_CV"] < THRESHOLD
@@ -757,7 +734,7 @@ def get_similar_periodicity(GRP_CRIT:int):
     excludes = TLS_ALERTS + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
 
     periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"],v["alert_name"]) for (k, v) in bkt_s.items()
-                      if (v["tdiff_CV"] < 1.25 
+                      if (v["tdiff_CV"] < 1
                       and v["tdiff_CV"] > 0.0
                       and v["size"] > MIN_PERIODIC_SIZE
                       and v["alert_name"] not in excludes)}.items(),
@@ -773,10 +750,10 @@ def get_similar_periodicity(GRP_CRIT:int):
 
     # Tries to add x to the FIRST similar bin found
     def add_to_bin(x):
-        curr_tdiff_avg = str_to_timedelta(x[1][0]).total_seconds()
+        curr_tdiff_avg = u.str_to_timedelta(x[1][0]).total_seconds()
         # Iterate on the period keys
         for str_bin_key in bins.keys():
-            bin_key = str_to_timedelta(str_bin_key).total_seconds()
+            bin_key = u.u.str_to_timedelta(str_bin_key).total_seconds()
             if are_similar(curr_tdiff_avg,bin_key):
                 bins[str_bin_key].append(x)
                 return 1
@@ -802,7 +779,7 @@ def get_similar_periodicity(GRP_CRIT:int):
         return {k : v for k,v in d.items() if len(v) >= 2}
 
     def get_avg_tdiff(v: list):
-        return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: str_to_timedelta(x[1][0]).total_seconds(), v))))))
+        return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: u.u.str_to_timedelta(x[1][0]).total_seconds(), v))))))
     return { get_avg_tdiff(v) : alert_grouped_bin for (k,v) in bins.items() if (alert_grouped_bin := groupby_alertid(v))}
     
 
@@ -877,27 +854,5 @@ def get_hosts_noalertid(hosts: dict):
         except KeyError:
             tmp[key] = v
     return tmp
-
-def group_hosts_first2IPblocks(hosts: dict):
-    tmp = {}
-    for k,v in hosts.items():
-        # determine whether it is IPv4 or IPv6 addr
-        sep = "." if (k[0].find(".") != -1) else ":"
-        # get the first 2 blocks of IP addr; i.e. 192.168.1.1 -> 192.168
-        ip1 = sep.join(re.split('\.|:',k[0],2)[:2])
-        if(len(k) == 4):    # (srv,cli,vlan,alert_id)
-            # parse second IP
-            ip2 = sep.join(re.split('\.|:',k[1],2)[:2])
-            tmp[(ip1,ip2,k[2])] = v
-        else: # len(k) == 3
-            tmp[(ip1,k[1])] = v
-    
-    return tmp
-
-def str_to_timedelta(s: str) -> dt.timedelta:
-    d = dt.datetime.strptime(s, "%H:%M:%S")
-    total_sec = d.hour*3600 + d.minute*60 + d.second  # total seconds calculation
-    return dt.timedelta(seconds=total_sec)
-
 
 dict_init_alertnames()

@@ -1,4 +1,5 @@
 import json 
+import datetime as dt
 def parse_keys_from_path(p):
    # This is a path example
    # "root['sup_level_alerts']['SRV']['periodic']['('255.255.255.255', 1, 1)']"
@@ -29,3 +30,39 @@ def low_level_info(alert):
                            "ndpi_smb_insecure_version",
                            "data_exfiltration"]
                            
+# Other utilities
+def get_BAT_path(x):
+    o = json.loads(x)
+    try:
+        # add bat_paths
+        path = o["last_url"]
+        return path
+    except KeyError:
+        return ""
+
+# Needed because json.dumps doesn't accept tuples as keys
+
+def str_key(d: dict):
+    return {str(k): (str_val(v) if (type(v) is list)
+                     else (
+                        str_key(v) if (type(v) is dict) else
+                        (str(v) if (type(v) is tuple)
+                           else v)))
+            for (k, v) in d.items()}
+
+def str_val(d:list):
+    return list(map(str,d))
+
+def addremove_to_singleton(a: dict, v):
+    if (v in a):
+        a.pop(v,None)
+        return
+    # else
+    a[v] = 1
+
+
+def str_to_timedelta(s: str) -> dt.timedelta:
+    d = dt.datetime.strptime(s, "%H:%M:%S")
+    total_sec = d.hour*3600 + d.minute*60 + d.second  # total seconds calculation
+    return dt.timedelta(seconds=total_sec)
+
