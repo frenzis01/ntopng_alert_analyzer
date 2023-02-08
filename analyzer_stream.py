@@ -112,10 +112,10 @@ try:
     while (True):
         now = datetime.datetime.now()
         harvest_bound = datetime.datetime.now() - datetime.timedelta(minutes=30)
-        curr["t_start"] = prev["t_end"].strftime("%H:%M:%S")
-        curr["t_end"] = now.strftime("%H:%M:%S")
+        curr["t_start"] = prev["t_end"].strftime("%d/%m/%Y %H:%M:%S")
+        curr["t_end"] = now.strftime("%d/%m/%Y %H:%M:%S")
         my_historical = Historical(my_ntopng)
-        # print("\tSending request "  + last15minutes.strftime("%H:%M:%S") + " --> " + datetime.datetime.now().strftime("%H:%M:%S") )
+        # print("\tSending request "  + last15minutes.strftime("%d/%m/%Y %H:%M:%S") + " --> " + datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S") )
         raw_alerts = my_historical.get_flow_alerts(iface_id, prev["t_end"].strftime('%s'), now.strftime(
             '%s'), "*", "severity = 5", 10000, "", "")
         harvesting(prev["t_end"])
@@ -129,7 +129,7 @@ try:
         curr["sup_level_alerts"] = (get_sup_level_alerts())
         # curr["secondary_groupings"] = (get_secondary_groupings())
         curr["singleton_alerts"] = (get_singleton_alertview())
-        prev["t_end"] = prev["t_end"].strftime("%H:%M:%S")
+        prev["t_end"] = prev["t_end"].strftime("%d/%m/%Y %H:%M:%S")
         diff = deepdiff.DeepDiff(prev,curr,verbose_level=0)
         # print(diff)
         keys = []

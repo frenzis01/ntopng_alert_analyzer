@@ -9,6 +9,7 @@ import numpy as np
 import datetime as dt
 import itertools
 import re
+import utils
 
 STREAMING_MODE = False
 LEARNING_PHASE = True
@@ -32,7 +33,9 @@ GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
 
 def to_be_ignored(a):
     EXCLUDED_VLAN = ["9","24","53","57","58","203"]
-    if a["vlan_id"] in EXCLUDED_VLAN:
+    EXCLUDED_ALERTIDS = ["91"] # 91:vlan_bidirectional_traffic
+    if (a["vlan_id"] in EXCLUDED_VLAN or
+        a["alert_id"] in EXCLUDED_ALERTIDS):
         return True
     return False
 
@@ -684,23 +687,27 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
     # We can set an entropy threshold to determine when srv and clients are
     # behaving oddly
 
-    def is_odd(x):
+    def is_odd(x,vlan_id):
         # Note: exclude not client-server paradigm associated alerts
         excludes = ["blacklisted"]
         PORT_S_TH   = 0.1
         IP_S_TH     = 0.5
-        if (GRP_CRIT != GRP_CLI and x["alert_name"] not in excludes and x["srv_port_S"] >= PORT_S_TH):
+        if (GRP_CRIT != GRP_CLI 
+            and x["alert_name"] not in excludes
+            and x["srv_port_S"] >= PORT_S_TH
+            and utils.is_server(vlan_id)):
             return "odd_server"
         # A client is odd if uses the SAME port with MANY servers
         if (GRP_CRIT != GRP_SRV 
             and x["alert_name"] not in excludes
             and x["cli_port_S"] <= PORT_S_TH
-            and x["srv_ip_S"] >= IP_S_TH):
+            and x["srv_ip_S"] >= IP_S_TH
+            and utils.is_client(vlan_id)):
             return "odd_client"
         return None
     
     # k = ("ip","vlan","alert_id") we must exclude "alert_id" 
-    tmp= {k: oddity for (k,v) in bkt_s.items() if (oddity := is_odd(v))}
+    tmp= {k: oddity for (k,v) in bkt_s.items() if (oddity := is_odd(v,k[-1:]))}
     # hosts = {}
     # for k,v in tmp.items():
     #     hosts[(k[0],k[1])] = v
@@ -712,7 +719,7 @@ def get_simultaneous(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
     return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k,v) in bkt_s.items() 
             if ((v["tdiff_CV"] == 0
-                 or v["tdiff_avg"] == "0:00:00")
+                 or (v["tdiff_avg"] == "0:00:00" and v["tdiff_CV"] <= 0.5))
             and v["size"] > MIN_PERIODIC_SIZE)}
 
 
