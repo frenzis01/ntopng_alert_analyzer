@@ -31,14 +31,15 @@ def low_level_info(alert):
                            "data_exfiltration"]
                            
 # Other utilities
-def get_BAT_path(x):
+def get_BAT_path_server(x):
     o = json.loads(x)
     try:
         # add bat_paths
         path = o["last_url"]
-        return path
+        server = o["last_server"]
+        return (path,server)
     except KeyError:
-        return ""
+        return ("","")
 
 # Needed because json.dumps doesn't accept tuples as keys
 
@@ -60,6 +61,14 @@ def addremove_to_singleton(a: dict, v):
     # else
     a[v] = 1
 
+def add_to_dict_dict_counter(s:dict,k,v):
+   if (k not in s):
+      s[k] = {v : 1}
+   else:
+      if (v not in s[k]):
+         s[k][v] = 1
+      else:
+         s[k][v] += 1
 
 def str_to_timedelta(s: str) -> dt.timedelta:
     d = dt.datetime.strptime(s, "%H:%M:%S")

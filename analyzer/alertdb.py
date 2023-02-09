@@ -24,6 +24,7 @@ snd_grp = {} # Secondary groupings
 
 
 bat_paths = {}
+bat_server = {}
 
 bkt_srv_stats = {}
 bkt_cli_stats = {}
@@ -203,7 +204,7 @@ def is_relevant_singleton(a):
     # The learning phase must be over, otherwise every new transfer
     # get marked as relevant 
     if (alert_name == "binary_application_transfer"
-        and (path := u.get_BAT_path(a["json"]))
+        and (path := (u.get_BAT_path_server(a["json"]))[0])
         and path not in bat_paths
         and LEARNING_PHASE == False):
         sav[alert_name][path] = SRVCLI_ID
@@ -361,14 +362,14 @@ def get_sup_level_alerts() -> dict:
     for grp_crit in [GRP_SRV,GRP_CLI,GRP_SRVCLI]:
         sup_level_alerts[map_id_to_name(grp_crit)] = {
             "higher_alert_types" : u.str_key(get_higher_alert_types(grp_crit)),
-            "tls_critical" : u.str_key(get_tls_critical(grp_crit)),
-            "cs_paradigm_odd" : u.str_key(get_cs_paradigm_odd(grp_crit)),
-            "blk_peer" : u.str_key(get_blk_peer(grp_crit)),
+            # "tls_critical" : u.str_key(get_tls_critical(grp_crit)),
+            # "cs_paradigm_odd" : u.str_key(get_cs_paradigm_odd(grp_crit)),
+            # "blk_peer" : u.str_key(get_blk_peer(grp_crit)),
             "simultaneous" : u.str_key(get_simultaneous(grp_crit)),
             "periodic" : u.str_key(get_periodic(grp_crit)),
             "similar_periodicity" : get_similar_periodicity(grp_crit),
             "bat_samefile" : u.str_key(get_bat_samefile(grp_crit)),
-            "missingUA" : u.str_key(get_missingUA(grp_crit)),
+            # "missingUA" : u.str_key(get_missingUA(grp_crit)),
         }
     return sup_level_alerts
 
@@ -553,14 +554,18 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
 
     if (s[0]["alert_id"] == 29):
         # get the first path
-        first_path = u.get_BAT_path(s[0]["json"])
+        first_path = (u.get_BAT_path_server(s[0]["json"]))[0]
+        paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + ((x["srv_ip"],x["cli_ip"],x["vlan_id"]),),s)
         if first_path != "":
             bat_paths[first_path] = 1
-            for p in map(u.get_BAT_path,map(lambda x: x["json"],s)):
+            for p,srv_name,k in paths_servers_keys:
                 if p != first_path:
                     first_path = ""
                     break
-            
+        # get all servers
+        for p,server_name,key in paths_servers_keys:
+            if server_name != "":
+                u.add_to_dict_dict_counter(bat_server,server_name,str(key))
 
         d["bft_same_file"] = first_path
 
