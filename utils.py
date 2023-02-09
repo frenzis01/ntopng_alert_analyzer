@@ -75,3 +75,65 @@ def str_to_timedelta(s: str) -> dt.timedelta:
     total_sec = d.hour*3600 + d.minute*60 + d.second  # total seconds calculation
     return dt.timedelta(seconds=total_sec)
 
+
+def get_srvcli_id(a):
+   return (a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"],
+           a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"],
+           a["vlan_id"])
+
+
+# @returns the longest sequence of subsequent common substrings
+# between l1 and l2
+def find_longest_common_subsequent_substrs(l1:list,l2:list):
+   # @returns the first sequence of subsequent common substrings
+   # and the index of the last matching substring of the longer list
+   def find_first_common_subsequent_substrs(l1:list,l2:list):
+      # a is the shortest list, b the longest
+      a = l1 if (len(l1) <= len(l2)) else l2
+      b = l2 if (len(l1) <= len(l2)) else l1
+
+      # res holds the FIRST sequence of substrings 
+      res = []
+      for i in range(len(a)):
+         for j in range(len(b)):
+            # found some matches, but no more
+            # NB 'j-1'
+            if(len(res) and (a[i] != b[j])):
+               return res,j-1
+
+
+            # found another subsequent match
+            if (a[i] == b[j]):
+               # add to resulting list
+               res.append(b[j])
+
+               # if there are no more elements in the shortest
+               # list then exit
+               if i + 1 == len(a):
+                   return res,j
+               # else move onto the next element 
+               i += 1
+      return res,j
+   
+   # a is the shortest list, b the longest
+   a = l1 if (len(l1) <= len(l2)) else l2
+   b = l2 if (len(l1) <= len(l2)) else l1
+
+   res = []
+   for i in range(len(b)):
+      tmp,index = find_first_common_subsequent_substrs(a,b[i:])
+      # if res is longer than half of b
+      # we are sure there ain't longer sequences
+      if (len(tmp) > len(b)/2):
+         return tmp
+      
+      # update res
+      res = tmp if (len(tmp) > len(res)) else res
+
+      index += 1 # consider element after the last matching
+      # if there isn't a chance to find a longer matching sequence
+      # exit 
+      if (len(b) - index < len(res)):
+         return res
+      # else try to find a longer matching sequence
+      i = index
