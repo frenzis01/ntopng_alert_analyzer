@@ -1,5 +1,9 @@
 import json 
 import datetime as dt
+
+from scipy.stats import entropy
+from collections import Counter
+
 def parse_keys_from_path(p):
    # This is a path example
    # "root['sup_level_alerts']['SRV']['periodic']['('255.255.255.255', 1, 1)']"
@@ -44,11 +48,11 @@ def get_BAT_path_server(x):
 # Needed because json.dumps doesn't accept tuples as keys
 
 def str_key(d: dict):
-    return {str(k): (str_val(v) if (type(v) is list)
-                     else (
-                        str_key(v) if (type(v) is dict) else
+    return {str(k): (str_val(v) if (type(v) is list) else
+                        (str_key(v) if (type(v) is dict) else
+                        (list(v) if (type(v) is set) else
                         (str(v) if (type(v) is tuple)
-                           else v)))
+                           else v))))
             for (k, v) in d.items()}
 
 def str_val(d:list):
@@ -76,11 +80,32 @@ def str_to_timedelta(s: str) -> dt.timedelta:
     return dt.timedelta(seconds=total_sec)
 
 
-def get_srvcli_id(a):
-   return (a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"],
-           a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"],
-           a["vlan_id"])
+def get_id(a,k:int):
+   if(k not in range(3)):
+      raise Exception("Invalid id: 0,1,2 (srv,cli,srvcli) available only")
+   srv_id = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
+   cli_id = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
+      
+   if (k == 0):
+      return srv_id
+   if (k == 1):
+      return cli_id
+   if (k == 2):
+      return (srv_id,cli_id)
 
+def get_id_vlan(a,k:int) -> tuple:
+   if(k not in range(3)):
+      raise Exception("Invalid id: 0,1,2 (srv,cli,srvcli) available only")
+   
+   srv_id = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
+   cli_id = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
+      
+   if (k == 0):
+      return (srv_id,a["vlan_id"])
+   if (k == 1):
+      return (cli_id,a["vlan_id"])
+   if (k == 2):
+      return (srv_id,cli_id,a["vlan_id"])
 
 # @returns the longest sequence of subsequent common substrings
 # between l1 and l2
@@ -153,3 +178,20 @@ def add_to_domain_dict(d:dict,name:str,key):
    d[new_name] = d.pop(best_match_name,{})
    d[new_name][key] = 0
    return new_name
+
+# Note that entropy is normalized and ranges from 0 to 1
+def shannon_entropy(data):
+   # Calculate the frequency of each element in the list
+   frequency_dict = Counter(data)
+   S_entropy = 0
+   probabilities = []
+   # Calculate the entropy
+   for key in frequency_dict:
+       # Calculate the relative frequency of each element
+       # and the related probability
+       probabilities.append(frequency_dict[key] / len(data))
+   # Use l as the log base, to normalize the result and
+   # get a value between 0 and 1
+   l = len(frequency_dict)
+   S_entropy = 0 if l == 1 else entropy(probabilities, base=l)
+   return S_entropy

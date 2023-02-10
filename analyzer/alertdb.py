@@ -19,8 +19,9 @@ bkt_cli = {}
 bkt_srvcli = {}
 
 singleton = {}
-sav = {} # Singleton Alert View
-snd_grp = {} # Secondary groupings
+sav = {}        # Singleton Alert View
+snd_grp = {}    # Secondary groupings
+unidir = {}     # Unidirectional traffic notice
 
 
 bat_paths = {}
@@ -38,7 +39,7 @@ def to_be_ignored(a):
                          "75"]  # connection_failed : Warning TCP Connection failed
     if (a["vlan_id"] in EXCLUDED_VLAN or
         a["alert_id"] in EXCLUDED_ALERTIDS):
-        return True
+            return True
     return False
 
 def new_alert(a):
@@ -46,9 +47,18 @@ def new_alert(a):
     if to_be_ignored(a):
         return
 
+
     # fix dtypes and remove unnecessary fields to improve performance
     remove_unwanted_fields(a)
     a_convert_dtypes(a)
+
+    if unidirectional_handler(a) == True:
+        return
+
+    # if unidirectional traffic but low severity discard
+    if (a["alert_id"] == 26 and a["severity"] <=4):
+        return
+
 
     # add to buckets (i.e. groups)
     global bkt_srv,bkt_cli,bkt_srvcli # use global reference
@@ -433,7 +443,45 @@ def remove_unwanted_fields(a):
     a.pop("srv_host_pool_id", None)
 
 
+def unidirectional_handler(a):
+    if (a["alert_id"] != 26): # 26 : Unidirectional traffic
+        return False
+    
+    o = json.loads(a["json"])
+    try:
+        # print(o)
+        # o = json.loads(a["json"])
+        o = o["alert_generation"]["flow_risk_info"]
+        o = json.loads(o)
+        if (o["46"] != "No server to client traffic"):
+            return False
+    except KeyError as e:
+        # print(repr(e))
+        return False
+    
+    # We are sure the alert indicates
+    # Unidir traffic from client to server
+    k = u.get_id_vlan(a,GRP_SRV)
+    cli_id = u.get_id(a,GRP_CLI)
+    srv_port = a["srv_port"]
+    unidir[k] = [(cli_id,srv_port)] if (k not in unidir) else unidir[k] + [(cli_id,srv_port)]
 
+    return True
+
+def get_unidir_probed():
+    probed = {}
+    MIN_PROBING_RELEVANT_SIZE = 4
+    PROBING_ENTROPY_THRESH = 0.5
+    for srv,t in unidir.items():
+        # If a server is a victim of probing, one or more client will be trying to 
+        # unidirectionally communicate with it on many different ports
+        if (len(unidir[srv]) > MIN_PROBING_RELEVANT_SIZE and
+            u.is_server(srv[1]) and
+            (s := u.shannon_entropy(list(map(lambda x: x[1],unidir[srv])))) > PROBING_ENTROPY_THRESH):
+            probed[srv] = set(map(lambda x: x[0],unidir[srv]))
+        # else:
+        #     probed[srv] = (s,len(unidir[srv]))
+    return probed
 
 # Stats calculation
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
@@ -470,27 +518,11 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     srv_ip_toN = list(map(ip_to_numeric,map(lambda x: x["srv_ip"],s)))
     cli_ip_toN = list(map(ip_to_numeric,map(lambda x: x["cli_ip"],s)))
     
-    # Note that entropy is normalized and ranges from 0 to 1
-    def shannon_entropy(data):
-        # Calculate the frequency of each element in the list
-        frequency_dict = Counter(data)
-        S_entropy = 0
-        probabilities = []
-        # Calculate the entropy
-        for key in frequency_dict:
-            # Calculate the relative frequency of each element
-            # and the related probability
-            probabilities.append(frequency_dict[key] / len(data))
-
-        # Use l as the log base, to normalize the result and
-        # get a value between 0 and 1
-        l = len(frequency_dict)
-        S_entropy = 0 if l == 1 else entropy(probabilities, base=l)
-        return S_entropy
-    d["srv_ip_S"] = shannon_entropy(srv_ip_toN)
-    d["cli_ip_S"] = shannon_entropy(cli_ip_toN)
-    d["srv_port_S"] = shannon_entropy(list(map(lambda x: x["srv_port"],s)))
-    d["cli_port_S"] = shannon_entropy(list(map(lambda x: x["cli_port"],s)))
+    
+    d["srv_ip_S"] = u.shannon_entropy(srv_ip_toN)
+    d["cli_ip_S"] = u.shannon_entropy(cli_ip_toN)
+    d["srv_port_S"] = u.shannon_entropy(list(map(lambda x: x["srv_port"],s)))
+    d["cli_port_S"] = u.shannon_entropy(list(map(lambda x: x["cli_port"],s)))
 
     # In case of SRV | CLI
     # If the other peer is always the same, this grouping will be found in SRVCLI
@@ -560,7 +592,7 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
         # get the first path
         first_path = (u.get_BAT_path_server(s[0]["json"]))[0]
         
-        paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + (u.get_srvcli_id(x),),s)
+        paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + (u.get_id_vlan(x,GRP_SRVCLI),),s)
         if first_path != "":
             bat_paths[first_path] = 1
             for p,srv_name,k in paths_servers_keys:
@@ -569,7 +601,7 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
                     break
         # get all servers
         for p,server_name,key in paths_servers_keys:
-            server_name = server_name if (server_name != "") else "Missing Server"
+            server_name = server_name if (server_name != "") else "-missing server name-"
             u.add_to_dict_dict_counter(bat_server,server_name,str(key))
 
         d["bft_same_file"] = first_path
@@ -763,7 +795,7 @@ def get_similar_periodicity(GRP_CRIT:int):
         curr_tdiff_avg = u.str_to_timedelta(x[1][0]).total_seconds()
         # Iterate on the period keys
         for str_bin_key in bins.keys():
-            bin_key = u.u.str_to_timedelta(str_bin_key).total_seconds()
+            bin_key = u.str_to_timedelta(str_bin_key).total_seconds()
             if are_similar(curr_tdiff_avg,bin_key):
                 bins[str_bin_key].append(x)
                 return 1
@@ -789,7 +821,7 @@ def get_similar_periodicity(GRP_CRIT:int):
         return {k : v for k,v in d.items() if len(v) >= 2}
 
     def get_avg_tdiff(v: list):
-        return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: u.u.str_to_timedelta(x[1][0]).total_seconds(), v))))))
+        return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: u.str_to_timedelta(x[1][0]).total_seconds(), v))))))
     return { get_avg_tdiff(v) : alert_grouped_bin for (k,v) in bins.items() if (alert_grouped_bin := groupby_alertid(v))}
     
 
