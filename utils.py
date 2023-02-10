@@ -137,3 +137,19 @@ def find_longest_common_subsequent_substrs(l1:list,l2:list):
          return res
       # else try to find a longer matching sequence
       i = index
+   return res
+
+
+def add_to_domain_dict(d:dict,name:str,key):
+   best_match = [name]
+   best_match_name = name
+   name_tokens = name.split(".")
+   for dga_name in (d.keys()):
+      tmp = find_longest_common_subsequent_substrs(name_tokens,dga_name.split("."))
+      best_match = tmp if (len(tmp) > len(best_match)) else best_match
+      best_match_name = dga_name if (len(tmp) > len(best_match)) else best_match_name
+   
+   new_name = ".".join(best_match)
+   d[new_name] = d.pop(best_match_name,{})
+   d[new_name][key] = 0
+   return new_name

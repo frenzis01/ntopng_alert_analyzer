@@ -116,9 +116,12 @@ for a in raw_alerts:
 update_bkts_stats()
 
 print(json.dumps(get_sup_level_alerts(),indent=2))
-def str_key(d:dict):
-        return {str(k): v for (k,v) in d.items()}
+# def str_key(d:dict):
+#         return {str(k): v for (k,v) in d.items()}
+
+import utils
 
 print(json.dumps(bat_server,indent=2))
+print(json.dumps(utils.str_key({k:v for k,v in dga_suspicious_domains.items() if len(v) > 1}),indent=2))
 # print(json.dumps(str_key(get_singleton()),indent=2))
 # print(json.dumps(str_key(get_singleton_alertview()),indent=2))

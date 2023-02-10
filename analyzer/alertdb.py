@@ -267,15 +267,19 @@ def is_relevant_singleton(a):
         return None
     if (alert_name == "ndpi_suspicious_dga_domain"
         and (domain_name := get_domain_name()) ):
-        # and domain_name not in dga_suspicious_domains):
-        if (domain_name not in snd_grp[alert_name]):
-            snd_grp[alert_name][domain_name] = {}
-        snd_grp[alert_name][domain_name][key] = 1
-        # snd_grp[alert_name][domain_name] = (snd_grp[alert_name][domain_name][key] if (domain_name in snd_grp[alert_name]) else [key])
-        # add to "known" domains
-        dga_suspicious_domains[domain_name] = key
-        # add domains to key tuple
-        return key + (domain_name,)
+        # # and domain_name not in dga_suspicious_domains):
+        # if (domain_name not in snd_grp[alert_name]):
+        #     snd_grp[alert_name][domain_name] = {}
+        # snd_grp[alert_name][domain_name][key] = 1
+        # # snd_grp[alert_name][domain_name] = (snd_grp[alert_name][domain_name][key] if (domain_name in snd_grp[alert_name]) else [key])
+        # # add to "known" domains
+        # dga_suspicious_domains[domain_name] = key
+        # # add domains to key tuple
+        # return key + (domain_name,)
+        key = SRVCLI_ID
+        partial_name = u.add_to_domain_dict(dga_suspicious_domains,domain_name,key)
+        dga_suspicious_domains[partial_name][key] += 1
+        return key + (partial_name,)
 
     # Cert self signed distinct on JA3 hash
 
@@ -555,7 +559,8 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     if (s[0]["alert_id"] == 29):
         # get the first path
         first_path = (u.get_BAT_path_server(s[0]["json"]))[0]
-        paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + ((x["srv_ip"],x["cli_ip"],x["vlan_id"]),),s)
+        
+        paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + (u.get_srvcli_id(x),),s)
         if first_path != "":
             bat_paths[first_path] = 1
             for p,srv_name,k in paths_servers_keys:
@@ -564,8 +569,8 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
                     break
         # get all servers
         for p,server_name,key in paths_servers_keys:
-            if server_name != "":
-                u.add_to_dict_dict_counter(bat_server,server_name,str(key))
+            server_name = server_name if (server_name != "") else "Missing Server"
+            u.add_to_dict_dict_counter(bat_server,server_name,str(key))
 
         d["bft_same_file"] = first_path
 
