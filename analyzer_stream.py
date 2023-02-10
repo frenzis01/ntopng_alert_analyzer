@@ -117,7 +117,7 @@ try:
         my_historical = Historical(my_ntopng)
         # print("\tSending request "  + last15minutes.strftime("%d/%m/%Y %H:%M:%S") + " --> " + datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S") )
         raw_alerts = my_historical.get_flow_alerts(iface_id, prev["t_end"].strftime('%s'), now.strftime(
-            '%s'), "*", "severity = 5", 10000, "", "")
+            '%s'), "*", "severity = 5", 100000, "", "")
         harvesting(prev["t_end"])
         for a in raw_alerts:
             new_alert(a)

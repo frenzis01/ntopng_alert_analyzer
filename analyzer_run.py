@@ -99,12 +99,17 @@ except ValueError as e:
 try:
 
     my_historical = Historical(my_ntopng)
-    last15minutes = datetime.datetime.now() - datetime.timedelta(minutes=30)
-    print("\tSending request "  + last15minutes.strftime("%H:%M:%S") + " --> " + datetime.datetime.now().strftime("%H:%M:%S") )
-    raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes.strftime('%s'), datetime.datetime.now().strftime(
+    now = datetime.datetime.now()
+    last15minutes = now - datetime.timedelta(minutes=30)
+    time_dict = {
+        "start" : last15minutes.strftime("%d/%m/%Y %H:%M:%S"),
+        "end" : now.strftime("%d/%m/%Y %H:%M:%S")
+    }
+    # print("\tSending request "  + last15minutes.strftime("%d/%m/%Y %H:%M:%S") + " --> " + now.strftime("%d/%m/%Y %H:%M:%S") )
+    raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes.strftime('%s'), now.strftime(
         '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "")
 
-    raw_alerts += my_historical.get_flow_alerts(iface_id, last15minutes.strftime('%s'), datetime.datetime.now().strftime(
+    raw_alerts += my_historical.get_flow_alerts(iface_id, last15minutes.strftime('%s'), now.strftime(
         '%s'), "*", "alert_id = 26", 200000, "", "")
 except ValueError as e:
     print(e)
@@ -113,19 +118,19 @@ except ValueError as e:
 
 # from analyzer.alertdb import *
 from analyzer.alertdb import *
-print("\tHandling alerts")
+# print("\tHandling alerts")
 for a in raw_alerts:
     new_alert(a)
 update_bkts_stats()
 
-print(json.dumps(get_sup_level_alerts(),indent=2))
+print(json.dumps({"time" : time_dict} | get_sup_level_alerts(),indent=2))
 # def str_key(d:dict):
 #         return {str(k): v for (k,v) in d.items()}
 
-from utils import str_key
+# from utils import str_key
 
-print(json.dumps(bat_server,indent=2))
-print(json.dumps(str_key({k:v for k,v in dga_suspicious_domains.items() if len(v) > 1}),indent=2))
-print(json.dumps(str_key(get_unidir_probed()),indent=2))
+# print(json.dumps(bat_server,indent=2))
+# print(json.dumps(str_key({k:v for k,v in dga_suspicious_domains.items() if len(v) > 1}),indent=2))
+# print(json.dumps(str_key(get_unidir_probed()),indent=2))
 # print(json.dumps(str_key(get_singleton()),indent=2))
 # print(json.dumps(str_key(get_singleton_alertview()),indent=2))

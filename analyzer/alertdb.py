@@ -372,9 +372,12 @@ def map_id_to_name(GRP_CRIT:int):
 
 def get_sup_level_alerts() -> dict:
     
-    sup_level_alerts = {}
-    for grp_crit in [GRP_SRV,GRP_CLI,GRP_SRVCLI]:
-        sup_level_alerts[map_id_to_name(grp_crit)] = {
+    sup_level_alerts = {"FLAT_GROUPINGS": {},
+                        "BAT_SERVER_NAMES": {},
+                        "DGA_DOMAINS": {},
+                        "PROBING_VICTIMS": {}}
+    for grp_crit in [GRP_SRV, GRP_CLI, GRP_SRVCLI]:
+        sup_level_alerts["FLAT_GROUPINGS"][map_id_to_name(grp_crit)] = {
             "higher_alert_types" : u.str_key(get_higher_alert_types(grp_crit)),
             # "tls_critical" : u.str_key(get_tls_critical(grp_crit)),
             # "cs_paradigm_odd" : u.str_key(get_cs_paradigm_odd(grp_crit)),
@@ -385,7 +388,10 @@ def get_sup_level_alerts() -> dict:
             "bat_samefile" : u.str_key(get_bat_samefile(grp_crit)),
             # "missingUA" : u.str_key(get_missingUA(grp_crit)),
         }
-    return sup_level_alerts
+    sup_level_alerts["BAT_SERVER_NAMES"] = bat_server
+    sup_level_alerts["DGA_DOMAINS"] = get_dga_sus_domains()
+    sup_level_alerts["PROBING_VICTIMS"] = get_unidir_probed()
+    return u.str_key(sup_level_alerts)
 
 # New alert handling UTILITIES 
 def a_convert_dtypes(a):
@@ -482,6 +488,9 @@ def get_unidir_probed():
         # else:
         #     probed[srv] = (s,len(unidir[srv]))
     return probed
+
+def get_dga_sus_domains():
+    return {k:v for k,v in dga_suspicious_domains.items() if len(v) > 1}
 
 # Stats calculation
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)
