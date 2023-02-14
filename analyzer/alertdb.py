@@ -10,6 +10,7 @@ import datetime as dt
 import itertools
 import re
 import utils as u
+from ipaddress import ip_address
 
 STREAMING_MODE = False
 LEARNING_PHASE = True
@@ -269,6 +270,7 @@ def is_relevant_singleton(a):
         # add username to key tuple
         return key + (username,)
 
+    WHITELIST_DOMAIN_TOKEN = ["microsoft", "windowsupdate", "unicomm"]
     def get_domain_name():
         flow_risk_info = json.loads(a_json["alert_generation"]["flow_risk_info"])
         if ("16" in flow_risk_info):
@@ -276,7 +278,8 @@ def is_relevant_singleton(a):
             return (flow_risk_info["16"])
         return None
     if (alert_name == "ndpi_suspicious_dga_domain"
-        and (domain_name := get_domain_name()) ):
+        and (domain_name := get_domain_name()) 
+        and not any(x in domain_name.split(".") for x in WHITELIST_DOMAIN_TOKEN)):
         # # and domain_name not in dga_suspicious_domains):
         # if (domain_name not in snd_grp[alert_name]):
         #     snd_grp[alert_name][domain_name] = {}
@@ -304,7 +307,8 @@ def is_relevant_singleton(a):
             return (tls_info["ja3.server_hash"],tls_info["ja3.client_hash"])
         return None
     if (alert_name == "tls_certificate_selfsigned"
-        and (ja3_hash := get_ja3_hash()) ):
+        and (ja3_hash := get_ja3_hash()) 
+        and not (ip_address(a["srv_ip"]).is_private)):
         # and ja3_hash not in tls_self_ja3_tuples):
         key = SRV_ID
         if (ja3_hash not in snd_grp[alert_name]):
@@ -375,7 +379,8 @@ def get_sup_level_alerts() -> dict:
     sup_level_alerts = {"FLAT_GROUPINGS": {},
                         "BAT_SERVER_NAMES": {},
                         "DGA_DOMAINS": {},
-                        "PROBING_VICTIMS": {}}
+                        "PROBING_VICTIMS": {},
+                        "TLS_SELFSIGNERS_JA3" : {}}
     for grp_crit in [GRP_SRV, GRP_CLI, GRP_SRVCLI]:
         sup_level_alerts["FLAT_GROUPINGS"][map_id_to_name(grp_crit)] = {
             "higher_alert_types" : u.str_key(get_higher_alert_types(grp_crit)),
@@ -391,6 +396,7 @@ def get_sup_level_alerts() -> dict:
     sup_level_alerts["BAT_SERVER_NAMES"] = bat_server
     sup_level_alerts["DGA_DOMAINS"] = get_dga_sus_domains()
     sup_level_alerts["PROBING_VICTIMS"] = get_unidir_probed()
+    sup_level_alerts["TLS_SELFSIGNERS_JA3"] = snd_grp["tls_certificate_selfsigned"]
     return u.str_key(sup_level_alerts)
 
 # New alert handling UTILITIES 
