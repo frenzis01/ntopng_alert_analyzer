@@ -420,6 +420,7 @@ def a_convert_dtypes(a):
     a["cli_port"] = int(a["cli_port"])
     a["alert_id"] = int(a["alert_id"])
     a["l7_proto"] = int(a["l7_proto"])
+    a["proto"] = int(a["proto"])
 
     a["srv_blacklisted"] = int(a["srv_blacklisted"])
     a["cli_blacklisted"] = int(a["cli_blacklisted"])
@@ -438,7 +439,6 @@ def remove_unwanted_fields(a):
     a.pop("srv_network", None)
     a.pop("flow_risk_bitmap", None)
     a.pop("user_label", None)
-    a.pop("proto", None)
     a.pop("alerts_map", None)
     a.pop("srv_location", None)
     a.pop("cli_location", None)
@@ -459,18 +459,24 @@ def unidirectional_handler(a):
     if (a["alert_id"] != 26): # 26 : Unidirectional traffic
         return False
     
+    # Consider only when the traffic goes from client to server
     o = json.loads(a["json"])
     try:
-        # print(o)
-        # o = json.loads(a["json"])
-        o = o["alert_generation"]["flow_risk_info"]
-        o = json.loads(o)
-        if (o["46"] != "No server to client traffic"):
+        flow_risk = o["alert_generation"]["flow_risk_info"]
+        flow_risk = json.loads(flow_risk)
+        if (flow_risk["46"] != "No server to client traffic"):
             return False
     except KeyError as e:
-        # print(repr(e))
         return False
     
+    # Consider only when proto is TCP or is UDP the application
+    # Requires at least one response from the server
+    BIDIR_APP = ["http", "tls", "dns"]
+    if not (a["proto"] == 6 or (a["proto"] == 17
+                                and any("".join(o["proto"].keys()).find(app) != -1 for app in BIDIR_APP))):
+        return False
+
+
     # We are sure the alert indicates
     # Unidir traffic from client to server
     k = u.get_id_vlan(a,GRP_SRV)
@@ -756,14 +762,14 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
     #     hosts[(k[0],k[1])] = v
     return get_hosts_noalertid(tmp)
 
-MIN_PERIODIC_SIZE = 3
+MIN_PERIODIC_SIZE = 4
 # @returns groups which are strongly periodic (i.e. tdiff_CV < 0.85)
 def get_simultaneous(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
     return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k,v) in bkt_s.items() 
             if ((v["tdiff_CV"] == 0
                  or (v["tdiff_avg"] == "0:00:00" and v["tdiff_CV"] <= 0.5))
-            and v["size"] > MIN_PERIODIC_SIZE)}
+            and v["size"] >= MIN_PERIODIC_SIZE)}
 
 
 def get_periodic(GRP_CRIT:int):
@@ -772,11 +778,11 @@ def get_periodic(GRP_CRIT:int):
     # Note: exclude not periodic relevant alerts
     excludes = TLS_ALERTS + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
 
-    THRESHOLD = 0.8
+    THRESHOLD = 1.0
     # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"],v["size"]))
     return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k, v) in bkt_s.items()
             if v["tdiff_CV"] < THRESHOLD
-            and v["tdiff_CV"] > 0.0
+            # and v["tdiff_CV"] > 0.0
             and v["tdiff_avg"] != "0:00:00"
             and v["size"] >= MIN_PERIODIC_SIZE
             and v["alert_name"] not in excludes}
