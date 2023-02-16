@@ -4,6 +4,10 @@ import datetime as dt
 from scipy.stats import entropy
 from collections import Counter
 
+from ipaddress import ip_address
+
+my_historical = iface_id = time_lower = time_upper = None
+
 def parse_keys_from_path(p):
    # This is a path example
    # "root['sup_level_alerts']['SRV']['periodic']['('255.255.255.255', 1, 1)']"
@@ -78,6 +82,43 @@ def str_to_timedelta(s: str) -> dt.timedelta:
     d = dt.datetime.strptime(s, "%H:%M:%S")
     total_sec = d.hour*3600 + d.minute*60 + d.second  # total seconds calculation
     return dt.timedelta(seconds=total_sec)
+
+
+def request_builder_srvcli(keys: list):
+   if (len(keys) == 0):
+      return ""
+
+   k = keys[0]
+   srv_condition = str(k[0])
+   try:
+      a = ip_address(k[0])
+      srv_condition = "srv_ip = '" + srv_condition + "'"
+   except ValueError:
+      srv_condition = "srv_name = '" + srv_condition + "'"
+   
+
+   cli_condition = str(k[1])
+   try:
+      a = ip_address(k[1])
+      cli_condition = "cli_ip = '" + cli_condition + "'"
+   except ValueError:
+      cli_condition = "cli_name = '" + cli_condition + "'"
+
+   return (" OR (" + srv_condition + " AND " + cli_condition + " AND vlan_id = " + str(k[2]) + ")"
+           + request_builder_srvcli(keys[1:]))
+
+def set_historical(h, iface, t_lower, t_upper):
+   global my_historical,iface_id, time_lower, time_upper
+   my_historical = h
+   iface_id = iface
+   time_lower = t_lower
+   time_upper = t_upper
+
+def make_request(r: str, maxhits: int):
+   if my_historical:
+      return my_historical.get_flow_alerts(iface_id, time_lower.strftime('%s'), time_upper.strftime(
+        '%s'), "*", r, maxhits, "", "")
+   return None
 
 
 def get_id(a,k:int):

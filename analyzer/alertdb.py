@@ -23,6 +23,8 @@ singleton = {}
 sav = {}        # Singleton Alert View
 snd_grp = {}    # Secondary groupings
 unidir = {}     # Unidirectional traffic notice
+longlived = {}  # Long-lived flows notice
+lowgoodput = {} # Low goodput ratio notice
 
 
 bat_paths = {}
@@ -45,15 +47,21 @@ def to_be_ignored(a):
 
 def new_alert(a):
     # check if has to be ignored
-    if to_be_ignored(a):
+    try:
+        if to_be_ignored(a):
+            return
+    except Exception as e:
+        print(a)
+        # print(e)
         return
-
 
     # fix dtypes and remove unnecessary fields to improve performance
     remove_unwanted_fields(a)
     a_convert_dtypes(a)
 
-    if unidirectional_handler(a) == True:
+    if (unidirectional_handler(a) or
+        low_goodput_handler(a) or
+        long_lived_flow_handler(a)):
         return
 
     # if unidirectional traffic but low severity discard
@@ -85,9 +93,6 @@ def update_bkts_stats() :
     bkt_srvcli_stats = {k : stats for (k,v) in bkt_srvcli.items() if (stats := compute_bkt_stats(v,GRP_SRVCLI))}
 
 def add_to_bucket(alert, bkt, key):
-    # DEBUG print
-    # if (alert["alert_id"] == 28 and alert["score"] > 150):
-    #     print(json.dumps(json.loads(alert["json"]),indent=2))
     try:
         x = bkt[key] # throws KeyError if not existing
         bkt[key].append(alert)
@@ -117,6 +122,7 @@ def harvesting(bound: dt.datetime):
     def to_harvest(alert):
         return alert["tstamp"] < bound
     
+    # TODO perform also on other groupings
     global bkt_srv,bkt_cli,bkt_srvcli
     bkt_srv = {k:harvested_v for (k,v) in bkt_srv.items() if len(harvested_v := list(filter(to_harvest,v)))}
     bkt_cli = {k:harvested_v for (k,v) in bkt_cli.items() if len(harvested_v := list(filter(to_harvest,v)))}
@@ -385,7 +391,7 @@ def get_sup_level_alerts() -> dict:
         sup_level_alerts["FLAT_GROUPINGS"][map_id_to_name(grp_crit)] = {
             "higher_alert_types" : u.str_key(get_higher_alert_types(grp_crit)),
             # "tls_critical" : u.str_key(get_tls_critical(grp_crit)),
-            # "cs_paradigm_odd" : u.str_key(get_cs_paradigm_odd(grp_crit)),
+            "cs_paradigm_odd" : u.str_key(get_cs_paradigm_odd(grp_crit)),
             # "blk_peer" : u.str_key(get_blk_peer(grp_crit)),
             "simultaneous" : u.str_key(get_simultaneous(grp_crit)),
             "periodic" : u.str_key(get_periodic(grp_crit)),
@@ -486,6 +492,25 @@ def unidirectional_handler(a):
 
     return True
 
+# These get useful when detecting "true" DGAs
+def long_lived_flow_handler(a):
+    if (a["alert_id"] != 11): # 11 : Long-lived Flow
+        return False
+    
+    k = u.get_id_vlan(a,GRP_SRVCLI)
+
+    longlived[k] = a["tstamp"]
+    return True
+
+def low_goodput_handler(a):
+    if (a["alert_id"] != 12): # 12 : Low Goodput Ratio
+        return False
+    
+    k = u.get_id_vlan(a,GRP_SRVCLI)
+
+    lowgoodput[k] = a["tstamp"]
+    return True
+
 def get_unidir_probed():
     probed = {}
     MIN_PROBING_RELEVANT_SIZE = 4
@@ -502,7 +527,20 @@ def get_unidir_probed():
     return probed
 
 def get_dga_sus_domains():
-    return {k:v for k,v in dga_suspicious_domains.items() if len(v) > 1}
+    toret = {k: list(v.keys())
+             for k, v in dga_suspicious_domains.items() if len(v) > 1}
+    for k, v in toret.items():
+        print("alert_id = 11 OR alert_id = 12" + u.request_builder_srvcli(v))
+        new_alerts = u.make_request("alert_id = 11 OR alert_id = 12" + u.request_builder_srvcli(v),100)
+        if (type(new_alerts) is str):
+            print(new_alerts)
+        else:
+            for a in new_alerts:
+                new_alert(a)
+        
+    # TODO  x in longlived and x in lowgoodput
+    return {k: x
+    for k,v in dga_suspicious_domains.items() if len((x := list(filter(lambda x : x in longlived or x in lowgoodput, v.keys())))) > 1}
 
 # Stats calculation
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)

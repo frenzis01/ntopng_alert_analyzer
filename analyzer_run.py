@@ -99,18 +99,25 @@ except ValueError as e:
 try:
 
     my_historical = Historical(my_ntopng)
-    now = datetime.datetime.now()
-    last15minutes = now - datetime.timedelta(minutes=30)
+    t_end = datetime.datetime.now() - datetime.timedelta(minutes=180)
+    t_start = t_end - datetime.timedelta(minutes=30)
     time_dict = {
-        "start" : last15minutes.strftime("%d/%m/%Y %H:%M:%S"),
-        "end" : now.strftime("%d/%m/%Y %H:%M:%S")
+        "start" : t_start.strftime("%d/%m/%Y %H:%M:%S"),
+        "end" : t_end.strftime("%d/%m/%Y %H:%M:%S")
     }
-    # print("\tSending request "  + last15minutes.strftime("%d/%m/%Y %H:%M:%S") + " --> " + now.strftime("%d/%m/%Y %H:%M:%S") )
-    raw_alerts = my_historical.get_flow_alerts(iface_id, last15minutes.strftime('%s'), now.strftime(
+    from utils import set_historical
+    set_historical(my_historical,iface_id,t_start,t_end)
+    # print(my_historical.get_flow_alerts(iface_id, t_start.strftime('%s'), t_end.strftime(
+    #     '%s'), "*", "alert_id = 26", 20, "", ""))
+    # print("\tSending request "  + t_start.strftime("%d/%m/%Y %H:%M:%S") + " --> " + t_end.strftime("%d/%m/%Y %H:%M:%S") )
+    raw_alerts = my_historical.get_flow_alerts(iface_id, t_start.strftime('%s'), t_end.strftime(
         '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "")
 
-    raw_alerts += my_historical.get_flow_alerts(iface_id, last15minutes.strftime('%s'), now.strftime(
+    print("First request done")
+    raw_alerts += my_historical.get_flow_alerts(iface_id, t_start.strftime('%s'), t_end.strftime(
         '%s'), "*", "alert_id = 26", 200000, "", "")
+    print("Second request done")
+    
 except ValueError as e:
     print(e)
     os._exit(-1)
@@ -124,6 +131,14 @@ for a in raw_alerts:
 update_bkts_stats()
 
 print(json.dumps({"time" : time_dict} | get_sup_level_alerts(),indent=2))
+
+from utils import str_key
+
+# print(json.dumps(str_key(longlived), indent=2))
+# print(json.dumps(str_key(lowgoodput), indent=2))
+print(list(longlived.keys()))
+print(list(lowgoodput.keys()))
+
 # def str_key(d:dict):
 #         return {str(k): v for (k,v) in d.items()}
 
