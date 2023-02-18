@@ -40,14 +40,17 @@ def low_level_info(alert):
                            
 # Other utilities
 def get_BAT_path_server(x):
-    o = json.loads(x)
-    try:
-        # add bat_paths
-        path = o["last_url"]
-        server = o["last_server"]
-        return (path,server)
-    except KeyError:
-        return ("","")
+   o = json.loads(x)
+   try:
+      # add bat_paths
+      path = o["last_url"]
+   except KeyError:
+      return ("","")
+   try:
+      server = o["last_server"]
+   except KeyError:
+      server = ""
+   return (path,server)
 
 # Needed because json.dumps doesn't accept tuples as keys
 
@@ -62,12 +65,11 @@ def str_key(d: dict):
 def str_val(d:list):
     return list(map(str,d))
 
-def addremove_to_singleton(a: dict, v):
-    if (v in a):
-        a.pop(v,None)
-        return
-    # else
-    a[v] = 1
+def addremove_to_singleton(a: dict, v, value):
+   if (v in a.keys()):
+      a.pop(v,None)
+   else:
+      a[v] = value
 
 def add_to_dict_dict_counter(s:dict,k,v):
    if (k not in s):
@@ -239,3 +241,57 @@ def shannon_entropy(data):
    l = len(frequency_dict)
    S_entropy = 0 if l == 1 else entropy(probabilities, base=l)
    return S_entropy
+
+
+# New alert handling UTILITIES 
+def a_convert_dtypes(a):
+
+    # format 2023-01-13 17:37:31
+    a["tstamp"] = dt.datetime.strptime(a["tstamp"], "%Y-%m-%d %H:%M:%S")
+    a["tstamp_end"] = dt.datetime.strptime(a["tstamp_end"], "%Y-%m-%d %H:%M:%S")
+
+    a["srv_port"] = int(a["srv_port"])
+    a["severity"] = int(a["severity"])
+    a["cli2srv_bytes"] = int(a["cli2srv_bytes"])
+    a["rowid"] = int(a["rowid"])
+    a["ip_version"] = int(a["ip_version"])
+    a["srv2cli_pkts"] = int(a["srv2cli_pkts"])
+    a["interface_id"] = int(a["interface_id"])
+    a["cli2srv_pkts"] = int(a["cli2srv_pkts"])
+    a["score"] = int(a["score"])
+    a["srv2cli_bytes"] = int(a["srv2cli_bytes"])
+    a["cli_port"] = int(a["cli_port"])
+    a["l7_proto"] = int(a["l7_proto"])
+    a["proto"] = int(a["proto"])
+
+    a["srv_blacklisted"] = int(a["srv_blacklisted"])
+    a["cli_blacklisted"] = int(a["cli_blacklisted"])
+
+    a["is_srv_victim"] = int(a["is_srv_victim"])
+    a["is_srv_attacker"] = int(a["is_srv_attacker"])
+    a["is_cli_victim"] = int(a["is_cli_victim"])
+    a["is_cli_attacker"] = int(a["is_cli_attacker"])
+
+
+def remove_unwanted_fields(a):
+    a.pop("info", None)
+    a.pop("l7_cat", None)
+    a.pop("input_snmp", None)
+    a.pop("l7_master_proto", None)
+    a.pop("srv_network", None)
+    a.pop("flow_risk_bitmap", None)
+    a.pop("user_label", None)
+    a.pop("alerts_map", None)
+    a.pop("srv_location", None)
+    a.pop("cli_location", None)
+    a.pop("output_snmp", None)
+    a.pop("cli_network", None)
+    a.pop("cli_country", None)
+    a.pop("srv_country", None)
+    a.pop("first_seen", None)
+    a.pop("alert_status", None)
+
+    a.pop("community_id", None)
+    a.pop("user_label_tstamp", None)
+    a.pop("cli_host_pool_id", None)
+    a.pop("srv_host_pool_id", None)

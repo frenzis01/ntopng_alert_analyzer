@@ -119,10 +119,8 @@ try:
     raw_alerts = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
         '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "tstamp")
 
-    print("First request done")
     raw_alerts += my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
         '%s'), "*", "alert_id = 26", 2000000, "", "")
-    print("Second request done")
     
 except ValueError as e:
     print(e)
@@ -140,18 +138,5 @@ print(json.dumps({"time" : time_dict} | get_sup_level_alerts(),indent=2))
 
 from utils import str_key
 
-# print(json.dumps(str_key(longlived), indent=2))
-# print(json.dumps(str_key(lowgoodput), indent=2))
 print(list(longlived.keys()))
 print(list(lowgoodput.keys()))
-
-# def str_key(d:dict):
-#         return {str(k): v for (k,v) in d.items()}
-
-# from utils import str_key
-
-# print(json.dumps(bat_server,indent=2))
-# print(json.dumps(str_key({k:v for k,v in dga_suspicious_domains.items() if len(v) > 1}),indent=2))
-# print(json.dumps(str_key(get_unidir_probed()),indent=2))
-# print(json.dumps(str_key(get_singleton()),indent=2))
-# print(json.dumps(str_key(get_singleton_alertview()),indent=2))

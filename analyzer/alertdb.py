@@ -13,7 +13,10 @@ import utils as u
 from ipaddress import ip_address
 
 STREAMING_MODE = False
-LEARNING_PHASE = True
+LEARNING_PHASE = False
+
+JA3_MISSING_SRV_HASH = "ja3_MISSING_SRV_hash"
+JA3_MISSING_CLI_HASH = "ja3_MISSING_CLI_hash"
 
 bkt_srv = {}
 bkt_cli = {}
@@ -27,7 +30,7 @@ longlived = {}  # Long-lived flows notice
 lowgoodput = {} # Low goodput ratio notice
 
 
-bat_paths = {}
+bat_paths = set()
 bat_server = {}
 
 bkt_srv_stats = {}
@@ -63,8 +66,8 @@ def new_alert(a):
         return
 
     # fix dtypes and remove unnecessary fields to improve performance
-    remove_unwanted_fields(a)
-    a_convert_dtypes(a)
+    u.remove_unwanted_fields(a)
+    u.a_convert_dtypes(a)
 
     if unidirectional_handler(a):
         return
@@ -116,12 +119,6 @@ def add_to_singleton(bkt,alert):
         if key:
             bkt[key] = (alert_name)
     return bkt
-
-def add_bat_path(path):
-    if path in bat_paths:
-        return bat_paths
-    else:
-        bat_paths[path] = 1
 
 def harvesting(bound: dt.datetime):
     def to_harvest(alert):
@@ -219,26 +216,28 @@ def is_relevant_singleton(a):
     # We only care about the client in this case
     if (alert_name == "ndpi_ssh_obsolete_client"):
         # sav[alert_name].append(CLI_ID)
-        u.addremove_to_singleton(sav[alert_name],CLI_ID)
+        u.addremove_to_singleton(sav[alert_name],CLI_ID,1)
         return CLI_ID
     
     # BAT is relevant if it concerns a previously unseen file
     # The learning phase must be over, otherwise every new transfer
-    # get marked as relevant 
+    # get marked as relevant
+    global bat_paths
     if (alert_name == "binary_application_transfer"
-        and (path := (u.get_BAT_path_server(a["json"]))[0])
-        and path not in bat_paths
-        and LEARNING_PHASE == False):
-        sav[alert_name][path] = SRVCLI_ID
-        return SRVCLI_ID
-    
-    # "ndpi_http_suspicious_content" leads to a +100 score
-    # In case of other simultaneous issues like non-std ports,
-    # or missing user agent, the score gets higher.
-    # We want to seize these scenarios
-    if (alert_name == "ndpi_http_suspicious_content" and a["score"] > 150):
-        u.addremove_to_singleton(sav[alert_name],SRVCLI_ID)
-        return SRVCLI_ID
+        and (path := ((u.get_BAT_path_server(a["json"]))[0])) != ""):
+        # if not learning and previously unseen path
+        if (LEARNING_PHASE == False and path not in bat_paths):
+            # add path and srvcli to singleton alerts
+            sav[alert_name][path] = SRVCLI_ID
+            # add to known paths
+            bat_paths.add(path)
+            return SRVCLI_ID
+        # if not learning and path already seen
+        elif (LEARNING_PHASE == False and path in bat_paths):
+            # remove entry from singleton alerts, if present
+            sav[alert_name].pop(path,None)
+        # add to known paths regardless
+        bat_paths.add(path)
 
     key = get_atk_key()
     a_json = json.loads(a["json"])
@@ -249,7 +248,7 @@ def is_relevant_singleton(a):
     if (alert_name == "remote_to_local_insecure_proto" 
         and a_json["ndpi_category_name"] == "RemoteAccess"
         and a["score"] >= 180):
-        u.addremove_to_singleton(sav[alert_name],key)
+        u.addremove_to_singleton(sav[alert_name],key,1)
         return key
     
     # When sending clear-text credentials
@@ -291,32 +290,31 @@ def is_relevant_singleton(a):
     if (alert_name == "ndpi_suspicious_dga_domain"
         and (domain_name := get_domain_name()) 
         and not any(x in domain_name.split(".") for x in WHITELIST_DOMAIN_TOKEN)):
-        # # and domain_name not in dga_suspicious_domains):
-        # if (domain_name not in snd_grp[alert_name]):
-        #     snd_grp[alert_name][domain_name] = {}
-        # snd_grp[alert_name][domain_name][key] = 1
-        # # snd_grp[alert_name][domain_name] = (snd_grp[alert_name][domain_name][key] if (domain_name in snd_grp[alert_name]) else [key])
-        # # add to "known" domains
-        # dga_suspicious_domains[domain_name] = key
-        # # add domains to key tuple
-        # return key + (domain_name,)
+        # We need both requestor and server in this case
         key = SRVCLI_ID
+        # Find the most similar domain if existent and remove the unmatching portion
+        # This results in the portion of the name used, e.g.
+        #       '1564903955.dgadom.com'
+        #       '6759204650.dgadom.com'
+        #    Will collapse under 'dgadom.com'
         partial_name = u.add_to_domain_dict(dga_suspicious_domains,domain_name,key)
         dga_suspicious_domains[partial_name][key] += 1
         return key + (partial_name,)
 
-    # Cert self signed distinct on JA3 hash
-
-
+    # Cert self signed grouped on JA3 hash
     def get_ja3_hash():
         if ("tls" not in a_json["proto"]):
             return None
         tls_info = a_json["proto"]["tls"]
-        if ("ja3.server_hash" in tls_info and
-            "ja3.client_hash" in tls_info):
+        
+        ja3_srv = tls_info["ja3.server_hash"] if ("ja3.server_hash" in tls_info) else JA3_MISSING_SRV_HASH
+        ja3_cli = tls_info["ja3.client_hash"] if ("ja3.client_hash" in tls_info) else JA3_MISSING_CLI_HASH
+        
+        if("ja3.client_hash" in tls_info):
             # Parse "tls_info": "{\"16\":\"domain.com\"}"
-            return (tls_info["ja3.server_hash"],tls_info["ja3.client_hash"])
+            return (ja3_srv,ja3_cli)
         return None
+    # Consider only non-private servers
     if (alert_name == "tls_certificate_selfsigned"
         and (ja3_hash := get_ja3_hash()) 
         and not (ip_address(a["srv_ip"]).is_private)):
@@ -331,6 +329,14 @@ def is_relevant_singleton(a):
         # add domains to key tuple
         return key + (ja3_hash,)
 
+    # "ndpi_http_suspicious_content" leads to a +100 score
+    # In case of other simultaneous issues like non-std ports,
+    # or missing user agent, the score gets higher.
+    # We want to seize these scenarios
+    if (alert_name == "ndpi_http_suspicious_content" and a["score"] > 150):
+        u.addremove_to_singleton(sav[alert_name],SRVCLI_ID,1)
+        return SRVCLI_ID
+
 
     # if (alert_name in RELEVANT_SINGLETON_ALERTS):
     if (alert_name not in IGNORE_SINGLETON_ALERTS):
@@ -338,7 +344,7 @@ def is_relevant_singleton(a):
             sav[alert_name] = {}
         # check if the key was already present
         # if yes, it is not a singleton
-        u.addremove_to_singleton(sav[alert_name],key)
+        u.addremove_to_singleton(sav[alert_name],key,1)
 
     
     return None
@@ -388,6 +394,7 @@ def map_id_to_name(GRP_CRIT:int):
 def get_sup_level_alerts() -> dict:
     
     sup_level_alerts = {"FLAT_GROUPINGS": {},
+                        "BAT_ONE_TIME" : {},
                         "BAT_SERVER_NAMES": {},
                         "DGA_DOMAINS": {},
                         "PROBING_VICTIMS": {},
@@ -402,66 +409,13 @@ def get_sup_level_alerts() -> dict:
             "periodic" : u.str_key(get_periodic(grp_crit)),
             "similar_periodicity" : get_similar_periodicity(grp_crit),
             "bat_samefile" : u.str_key(get_bat_samefile(grp_crit)),
-            # "missingUA" : u.str_key(get_missingUA(grp_crit)),
         }
+    sup_level_alerts["BAT_ONE_TIME"] = sav["binary_application_transfer"]
     sup_level_alerts["BAT_SERVER_NAMES"] = bat_server
     sup_level_alerts["DGA_DOMAINS"] = get_dga_sus_domains()
     sup_level_alerts["PROBING_VICTIMS"] = get_unidir_probed()
     sup_level_alerts["TLS_SELFSIGNERS_JA3"] = snd_grp["tls_certificate_selfsigned"]
     return u.str_key(sup_level_alerts)
-
-# New alert handling UTILITIES 
-def a_convert_dtypes(a):
-
-    # format 2023-01-13 17:37:31
-    a["tstamp"] = dt.datetime.strptime(a["tstamp"], "%Y-%m-%d %H:%M:%S")
-    a["tstamp_end"] = dt.datetime.strptime(a["tstamp_end"], "%Y-%m-%d %H:%M:%S")
-
-    a["srv_port"] = int(a["srv_port"])
-    a["severity"] = int(a["severity"])
-    a["cli2srv_bytes"] = int(a["cli2srv_bytes"])
-    a["rowid"] = int(a["rowid"])
-    a["ip_version"] = int(a["ip_version"])
-    a["srv2cli_pkts"] = int(a["srv2cli_pkts"])
-    a["interface_id"] = int(a["interface_id"])
-    a["cli2srv_pkts"] = int(a["cli2srv_pkts"])
-    a["score"] = int(a["score"])
-    a["srv2cli_bytes"] = int(a["srv2cli_bytes"])
-    a["cli_port"] = int(a["cli_port"])
-    a["l7_proto"] = int(a["l7_proto"])
-    a["proto"] = int(a["proto"])
-
-    a["srv_blacklisted"] = int(a["srv_blacklisted"])
-    a["cli_blacklisted"] = int(a["cli_blacklisted"])
-
-    a["is_srv_victim"] = int(a["is_srv_victim"])
-    a["is_srv_attacker"] = int(a["is_srv_attacker"])
-    a["is_cli_victim"] = int(a["is_cli_victim"])
-    a["is_cli_attacker"] = int(a["is_cli_attacker"])
-
-
-def remove_unwanted_fields(a):
-    a.pop("info", None)
-    a.pop("l7_cat", None)
-    a.pop("input_snmp", None)
-    a.pop("l7_master_proto", None)
-    a.pop("srv_network", None)
-    a.pop("flow_risk_bitmap", None)
-    a.pop("user_label", None)
-    a.pop("alerts_map", None)
-    a.pop("srv_location", None)
-    a.pop("cli_location", None)
-    a.pop("output_snmp", None)
-    a.pop("cli_network", None)
-    a.pop("cli_country", None)
-    a.pop("srv_country", None)
-    a.pop("first_seen", None)
-    a.pop("alert_status", None)
-
-    a.pop("community_id", None)
-    a.pop("user_label_tstamp", None)
-    a.pop("cli_host_pool_id", None)
-    a.pop("srv_host_pool_id", None)
 
 
 def unidirectional_handler(a):
@@ -533,8 +487,6 @@ def get_unidir_probed():
             u.is_server(srv[1]) and
             (s := u.shannon_entropy(list(map(lambda x: x[1],unidir[srv])))) > PROBING_ENTROPY_THRESH):
             probed[srv] = set(map(lambda x: x[0],unidir[srv]))
-        # else:
-        #     probed[srv] = (s,len(unidir[srv]))
     return probed
 
 def get_dga_sus_domains():
@@ -554,7 +506,6 @@ def get_dga_sus_domains():
         # 11 -> Longlived flows | 12 -> Lowgoodput
         # Request first only Longlived flows
         req_str = "(alert_id=11) AND (" + req_str_hosts + ")"
-        # print("\n\n" + req_str)
         # 5 hit per key are sufficient for our purposes
         # Note that if there are, for example, four keys, thus maxhits = 4*5 = 20
         # We might get 20 hits related to the same key.
@@ -563,14 +514,8 @@ def get_dga_sus_domains():
         
         # Now request lowgoodput flows
         req_str = "(alert_id=12) AND (" + req_str_hosts + ")"
-        # print("\n\n" + req_str)
-        tmp = u.make_request(req_str, 5 * len(v))
-        if (type(tmp) is str):
-            print(tmp)
-            exit()
-        new_alerts += tmp
+        new_alerts = u.make_request(req_str, 5 * len(v))
         for a in new_alerts:
-            # print(a["alert_id"],a["cli_ip"],a["cli_name"],a["vlan_id"])
             # since 'alert_id = 11 OR alert_id = 12'
             # each alert will be handled properly and put in longlived or lowgoodput
             new_alert(a)
@@ -693,7 +638,6 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
         
         paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + (u.get_id_vlan(x,GRP_SRVCLI),),s)
         if first_path != "":
-            bat_paths[first_path] = 1
             for p,srv_name,k in paths_servers_keys:
                 if p != first_path:
                     first_path = ""
