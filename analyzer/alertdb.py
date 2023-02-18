@@ -9,7 +9,7 @@ import numpy as np
 import datetime as dt
 import itertools
 import re
-import utils as u
+from .utils import *
 from ipaddress import ip_address
 
 STREAMING_MODE = False
@@ -66,8 +66,8 @@ def new_alert(a):
         return
 
     # fix dtypes and remove unnecessary fields to improve performance
-    u.remove_unwanted_fields(a)
-    u.a_convert_dtypes(a)
+    remove_unwanted_fields(a)
+    a_convert_dtypes(a)
 
     if unidirectional_handler(a):
         return
@@ -216,7 +216,7 @@ def is_relevant_singleton(a):
     # We only care about the client in this case
     if (alert_name == "ndpi_ssh_obsolete_client"):
         # sav[alert_name].append(CLI_ID)
-        u.addremove_to_singleton(sav[alert_name],CLI_ID,1)
+        addremove_to_singleton(sav[alert_name],CLI_ID,1)
         return CLI_ID
     
     # BAT is relevant if it concerns a previously unseen file
@@ -224,7 +224,7 @@ def is_relevant_singleton(a):
     # get marked as relevant
     global bat_paths
     if (alert_name == "binary_application_transfer"
-        and (path := ((u.get_BAT_path_server(a["json"]))[0])) != ""):
+        and (path := ((get_BAT_path_server(a["json"]))[0])) != ""):
         # if not learning and previously unseen path
         if (LEARNING_PHASE == False and path not in bat_paths):
             # add path and srvcli to singleton alerts
@@ -248,7 +248,7 @@ def is_relevant_singleton(a):
     if (alert_name == "remote_to_local_insecure_proto" 
         and a_json["ndpi_category_name"] == "RemoteAccess"
         and a["score"] >= 180):
-        u.addremove_to_singleton(sav[alert_name],key,1)
+        addremove_to_singleton(sav[alert_name],key,1)
         return key
     
     # When sending clear-text credentials
@@ -297,7 +297,7 @@ def is_relevant_singleton(a):
         #       '1564903955.dgadom.com'
         #       '6759204650.dgadom.com'
         #    Will collapse under 'dgadom.com'
-        partial_name = u.add_to_domain_dict(dga_suspicious_domains,domain_name,key)
+        partial_name = add_to_domain_dict(dga_suspicious_domains,domain_name,key)
         dga_suspicious_domains[partial_name][key] += 1
         return key + (partial_name,)
 
@@ -334,7 +334,7 @@ def is_relevant_singleton(a):
     # or missing user agent, the score gets higher.
     # We want to seize these scenarios
     if (alert_name == "ndpi_http_suspicious_content" and a["score"] > 150):
-        u.addremove_to_singleton(sav[alert_name],SRVCLI_ID,1)
+        addremove_to_singleton(sav[alert_name],SRVCLI_ID,1)
         return SRVCLI_ID
 
 
@@ -344,7 +344,7 @@ def is_relevant_singleton(a):
             sav[alert_name] = {}
         # check if the key was already present
         # if yes, it is not a singleton
-        u.addremove_to_singleton(sav[alert_name],key,1)
+        addremove_to_singleton(sav[alert_name],key,1)
 
     
     return None
@@ -357,15 +357,15 @@ def get_singleton() -> dict:
     return singleton
 
 def get_singleton_alertview() -> dict:
-    return {k: (u.str_key(v) if (type(v) is dict)
-                else (u.str_val(v) if (type(v) is list)
+    return {k: (str_key(v) if (type(v) is dict)
+                else (str_val(v) if (type(v) is list)
                 else v))
                 
                 for k, v in sav.items()}
 
 def get_secondary_groupings() -> dict:
-    return {k: (u.str_key(v) if (type(v) is dict)
-                else (u.str_val(v) if (type(v) is list)
+    return {k: (str_key(v) if (type(v) is dict)
+                else (str_val(v) if (type(v) is list)
                 else v))
                 
                 for k, v in snd_grp.items()}
@@ -401,21 +401,21 @@ def get_sup_level_alerts() -> dict:
                         "TLS_SELFSIGNERS_JA3" : {}}
     for grp_crit in [GRP_SRV, GRP_CLI, GRP_SRVCLI]:
         sup_level_alerts["FLAT_GROUPINGS"][map_id_to_name(grp_crit)] = {
-            "higher_alert_types" : u.str_key(get_higher_alert_types(grp_crit)),
-            # "tls_critical" : u.str_key(get_tls_critical(grp_crit)),
-            "cs_paradigm_odd" : u.str_key(get_cs_paradigm_odd(grp_crit)),
-            # "blk_peer" : u.str_key(get_blk_peer(grp_crit)),
-            "simultaneous" : u.str_key(get_simultaneous(grp_crit)),
-            "periodic" : u.str_key(get_periodic(grp_crit)),
+            "higher_alert_types" : str_key(get_higher_alert_types(grp_crit)),
+            # "tls_critical" : str_key(get_tls_critical(grp_crit)),
+            "cs_paradigm_odd" : str_key(get_cs_paradigm_odd(grp_crit)),
+            # "blk_peer" : str_key(get_blk_peer(grp_crit)),
+            "simultaneous" : str_key(get_simultaneous(grp_crit)),
+            "periodic" : str_key(get_periodic(grp_crit)),
             "similar_periodicity" : get_similar_periodicity(grp_crit),
-            "bat_samefile" : u.str_key(get_bat_samefile(grp_crit)),
+            "bat_samefile" : str_key(get_bat_samefile(grp_crit)),
         }
     sup_level_alerts["BAT_ONE_TIME"] = sav["binary_application_transfer"]
     sup_level_alerts["BAT_SERVER_NAMES"] = bat_server
     sup_level_alerts["DGA_DOMAINS"] = get_dga_sus_domains()
     sup_level_alerts["PROBING_VICTIMS"] = get_unidir_probed()
     sup_level_alerts["TLS_SELFSIGNERS_JA3"] = snd_grp["tls_certificate_selfsigned"]
-    return u.str_key(sup_level_alerts)
+    return str_key(sup_level_alerts)
 
 
 def unidirectional_handler(a):
@@ -442,8 +442,8 @@ def unidirectional_handler(a):
 
     # We are sure the alert indicates
     # Unidir traffic from client to server
-    k = u.get_id_vlan(a,GRP_SRV)
-    cli_id = u.get_id(a,GRP_CLI)
+    k = get_id_vlan(a,GRP_SRV)
+    cli_id = get_id(a,GRP_CLI)
     srv_port = a["srv_port"]
     unidir[k] = [(cli_id,srv_port)] if (k not in unidir) else unidir[k] + [(cli_id,srv_port)]
 
@@ -454,26 +454,26 @@ def long_lived_flow_handler(a):
     if (a["alert_id"] != 11): # 11 : Long-lived Flow
         return False
     
-    k = u.get_id_vlan(a,GRP_CLI)
+    k = get_id_vlan(a,GRP_CLI)
 
     # longlived[k] = a["tstamp"]
     # "tstamp" is not included in this case, since, for some odd reason,
     # it cannot be put in the select statement of the query performed for
     # this type of alert
-    longlived[k] = u.time_lower.strftime("%d-%m-%Y %H:%M:%S")
+    longlived[k] = time_lower.strftime("%d-%m-%Y %H:%M:%S")
     return True
 
 def low_goodput_handler(a):
     if (a["alert_id"] != 12): # 12 : Low Goodput Ratio
         return False
     
-    k = u.get_id_vlan(a,GRP_CLI)
+    k = get_id_vlan(a,GRP_CLI)
 
     # lowgoodput[k] = a["tstamp"]
     # "tstamp" is not included in this case, since, for some odd reason,
     # it cannot be put in the select statement of the query performed for
     # this type of alert
-    lowgoodput[k] = u.time_lower.strftime("%d-%m-%Y %H:%M:%S")
+    lowgoodput[k] = time_lower.strftime("%d-%m-%Y %H:%M:%S")
     return True
 
 def get_unidir_probed():
@@ -484,8 +484,8 @@ def get_unidir_probed():
         # If a server is a victim of probing, one or more client will be trying to 
         # unidirectionally communicate with it on many different ports
         if (len(unidir[srv]) > MIN_PROBING_RELEVANT_SIZE and
-            u.is_server(srv[1]) and
-            (s := u.shannon_entropy(list(map(lambda x: x[1],unidir[srv])))) > PROBING_ENTROPY_THRESH):
+            is_server(srv[1]) and
+            (s := shannon_entropy(list(map(lambda x: x[1],unidir[srv])))) > PROBING_ENTROPY_THRESH):
             probed[srv] = set(map(lambda x: x[0],unidir[srv]))
     return probed
 
@@ -502,7 +502,7 @@ def get_dga_sus_domains():
     # For each client (potential attacker) perform a request 
     # to get its associated longlived or lowgoodput alerts
     for k, v in toret.items():
-        req_str_hosts = u.request_builder_srvcli(v)
+        req_str_hosts = request_builder_srvcli(v)
         # 11 -> Longlived flows | 12 -> Lowgoodput
         # Request first only Longlived flows
         req_str = "(alert_id=11) AND (" + req_str_hosts + ")"
@@ -510,11 +510,11 @@ def get_dga_sus_domains():
         # Note that if there are, for example, four keys, thus maxhits = 4*5 = 20
         # We might get 20 hits related to the same key.
         # Not a big deal.
-        new_alerts = u.make_request(req_str,5 * len(v))
+        new_alerts = make_request(req_str,5 * len(v))
         
         # Now request lowgoodput flows
         req_str = "(alert_id=12) AND (" + req_str_hosts + ")"
-        new_alerts = u.make_request(req_str, 5 * len(v))
+        new_alerts = make_request(req_str, 5 * len(v))
         for a in new_alerts:
             # since 'alert_id = 11 OR alert_id = 12'
             # each alert will be handled properly and put in longlived or lowgoodput
@@ -560,10 +560,10 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     cli_ip_toN = list(map(ip_to_numeric,map(lambda x: x["cli_ip"],s)))
     
     
-    d["srv_ip_S"] = u.shannon_entropy(srv_ip_toN)
-    d["cli_ip_S"] = u.shannon_entropy(cli_ip_toN)
-    d["srv_port_S"] = u.shannon_entropy(list(map(lambda x: x["srv_port"],s)))
-    d["cli_port_S"] = u.shannon_entropy(list(map(lambda x: x["cli_port"],s)))
+    d["srv_ip_S"] = shannon_entropy(srv_ip_toN)
+    d["cli_ip_S"] = shannon_entropy(cli_ip_toN)
+    d["srv_port_S"] = shannon_entropy(list(map(lambda x: x["srv_port"],s)))
+    d["cli_port_S"] = shannon_entropy(list(map(lambda x: x["cli_port"],s)))
 
     # In case of SRV | CLI
     # If the other peer is always the same, this grouping will be found in SRVCLI
@@ -634,9 +634,9 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
 
     if (s[0]["alert_id"] == 29):
         # get the first path
-        first_path = (u.get_BAT_path_server(s[0]["json"]))[0]
+        first_path = (get_BAT_path_server(s[0]["json"]))[0]
         
-        paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + (u.get_id_vlan(x,GRP_SRVCLI),),s)
+        paths_servers_keys = map(lambda x: get_BAT_path_server(x["json"]) + (get_id_vlan(x,GRP_SRVCLI),),s)
         if first_path != "":
             for p,srv_name,k in paths_servers_keys:
                 if p != first_path:
@@ -645,7 +645,7 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
         # get all servers
         for p,server_name,key in paths_servers_keys:
             server_name = server_name if (server_name != "") else "-missing server name-"
-            u.add_to_dict_dict_counter(bat_server,server_name,str(key))
+            add_to_dict_dict_counter(bat_server,server_name,str(key))
 
         d["bft_same_file"] = first_path
 
@@ -763,14 +763,14 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
         if (GRP_CRIT != GRP_CLI 
             and x["alert_name"] not in excludes
             and x["srv_port_S"] >= PORT_S_TH
-            and u.is_server(vlan_id)):
+            and is_server(vlan_id)):
             return "odd_server"
         # A client is odd if uses the SAME port with MANY servers
         if (GRP_CRIT != GRP_SRV 
             and x["alert_name"] not in excludes
             and x["cli_port_S"] <= PORT_S_TH
             and x["srv_ip_S"] >= IP_S_TH
-            and u.is_client(vlan_id)):
+            and is_client(vlan_id)):
             return "odd_client"
         return None
     
@@ -835,10 +835,10 @@ def get_similar_periodicity(GRP_CRIT:int):
 
     # Tries to add x to the FIRST similar bin found
     def add_to_bin(x):
-        curr_tdiff_avg = u.str_to_timedelta(x[1][0]).total_seconds()
+        curr_tdiff_avg = str_to_timedelta(x[1][0]).total_seconds()
         # Iterate on the period keys
         for str_bin_key in bins.keys():
-            bin_key = u.str_to_timedelta(str_bin_key).total_seconds()
+            bin_key = str_to_timedelta(str_bin_key).total_seconds()
             if are_similar(curr_tdiff_avg,bin_key):
                 bins[str_bin_key].append(x)
                 return 1
@@ -864,7 +864,7 @@ def get_similar_periodicity(GRP_CRIT:int):
         return {k : v for k,v in d.items() if len(v) >= 2}
 
     def get_avg_tdiff(v: list):
-        return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: u.str_to_timedelta(x[1][0]).total_seconds(), v))))))
+        return str(dt.timedelta(seconds=int(np.mean(list(map(lambda x: str_to_timedelta(x[1][0]).total_seconds(), v))))))
     return { get_avg_tdiff(v) : alert_grouped_bin for (k,v) in bins.items() if (alert_grouped_bin := groupby_alertid(v))}
     
 

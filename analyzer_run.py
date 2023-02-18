@@ -104,18 +104,8 @@ try:
         "start" : t_start.strftime("%d/%m/%Y %H:%M:%S"),
         "end" : t_end.strftime("%d/%m/%Y %H:%M:%S")
     }
-    from utils import set_historical
+    from analyzer.utils import set_historical
     set_historical(my_historical,iface_id,t_start,t_end)
-    # print(my_historical.get_flow_alerts(iface_id, t_start.strftime('%s'), t_end.strftime(
-    #     '%s'), "*", "alert_id = 26", 20, "", ""))
-    # print("\tSending request "  + t_start.strftime("%d/%m/%Y %H:%M:%S") + " --> " + t_end.strftime("%d/%m/%Y %H:%M:%S") )
-    # my_historical.self_test("192.168.1.12")
-
-    # rsp = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime('%s'), '*', "(alert_id=11 OR alert_id=12) AND (cli_name='ad01srvr.arcaspa.intra' AND vlan_id=11) OR (cli_ip = '172.30.11.12' AND vlan_id=11) OR (cli_name='srvunicommdc.unicomm.intra' AND vlan_id=2)", 10, '', '')
-    # rsp = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime('%s'), '*', "((alert_id=11 OR alert_id=12) AND ((cli_name='ad01srvr.arcaspa.intra' AND vlan_id=11) OR (cli_ip = '172.30.11.12' AND vlan_id=11) OR (cli_name='srvunicommdc.unicomm.intra' AND vlan_id=2)))", 10, '', '')
-    # for a in rsp:
-    #     print(a)
-
     raw_alerts = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
         '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "tstamp")
 
@@ -135,8 +125,6 @@ for a in raw_alerts:
 update_bkts_stats()
 
 print(json.dumps({"time" : time_dict} | get_sup_level_alerts(),indent=2))
-
-from utils import str_key
 
 print(list(longlived.keys()))
 print(list(lowgoodput.keys()))
