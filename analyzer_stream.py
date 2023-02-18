@@ -13,7 +13,6 @@ from ntopng.ntopng import Ntopng
 from ntopng.interface import Interface
 from ntopng.host import Host
 from ntopng.historical import Historical
-from ntopng.flow import Flow
 
 # My imports
 import datetime
@@ -29,7 +28,6 @@ from math import log2
 import ast
 import deepdiff
 import dictdiffer
-import utils
 
 
 # Defaults
@@ -109,16 +107,19 @@ try:
     prev["sup_level_alerts"] = (get_sup_level_alerts())
     prev["secondary_groupings"] = (get_secondary_groupings())
     prev["singleton_alerts"] = (get_singleton_alertview())
+    my_historical = Historical(my_ntopng,iface_id)
+    from analyzer.utils.u import set_historical
+
     while (True):
         now = datetime.datetime.now()
         harvest_bound = datetime.datetime.now() - datetime.timedelta(minutes=30)
         curr["t_start"] = prev["t_end"].strftime("%d/%m/%Y %H:%M:%S")
         curr["t_end"] = now.strftime("%d/%m/%Y %H:%M:%S")
-        my_historical = Historical(my_ntopng)
         # print("\tSending request "  + last15minutes.strftime("%d/%m/%Y %H:%M:%S") + " --> " + datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S") )
-        raw_alerts = my_historical.get_flow_alerts(iface_id, prev["t_end"].strftime('%s'), now.strftime(
+        raw_alerts = my_historical.get_flow_alerts(prev["t_end"].strftime('%s'), now.strftime(
             '%s'), "*", "severity = 5", 100000, "", "")
-        harvesting(prev["t_end"])
+        set_historical(my_historical,iface_id,harvest_bound,now)
+        harvesting(prev["t_end"]) # TODO needs fixing
         for a in raw_alerts:
             new_alert(a)
         update_bkts_stats()
@@ -139,7 +140,7 @@ try:
             keys += (diff["values_changed"])
         
         alerts_update = {}
-        keys_l = list(map(utils.parse_keys_from_path,keys))
+        keys_l = list(map(u.parse_keys_from_path,keys))
         # print(keys_l)
         if len(keys_l):
             alerts_update['t_start'] = curr["t_start"]
@@ -150,7 +151,7 @@ try:
                 # print(json.dumps(val,indent=2))
             # else:
                 # str(val)
-            val = utils.get_value_from_keys(curr,list(k))
+            val = u.get_value_from_keys(curr,list(k))
             alerts_update[str(k)] = val
         
 

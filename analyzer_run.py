@@ -104,7 +104,7 @@ try:
         "start" : t_start.strftime("%d/%m/%Y %H:%M:%S"),
         "end" : t_end.strftime("%d/%m/%Y %H:%M:%S")
     }
-    from analyzer.utils import set_historical
+    from analyzer.utils.u import set_historical
     set_historical(my_historical,iface_id,t_start,t_end)
     raw_alerts = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
         '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "tstamp")
