@@ -527,20 +527,46 @@ def get_unidir_probed():
     return probed
 
 def get_dga_sus_domains():
-    toret = {k: list(v.keys())
-             for k, v in dga_suspicious_domains.items() if len(v) > 1}
+    # Each v is a tuple (srv,cli,vlan)
+    # But we want to detect only the clients' behavior,
+    # to check whether they are associated with
+    # longlived flows or lowgoodput ratio alerts,
+    # Which might mean they are actual DGAs
+
+    # Create a list using only keys, and get only (cli,vlan) discarding srv
+    toret = {k: list(set(map(lambda x: x[1:],v.keys())))
+             for k, v in dga_suspicious_domains.items()}
+    # For each client (potential attacker) perform a request 
+    # to get its associated longlived or lowgoodput alerts
     for k, v in toret.items():
-        print("alert_id = 11 OR alert_id = 12" + u.request_builder_srvcli(v))
-        new_alerts = u.make_request("alert_id = 11 OR alert_id = 12" + u.request_builder_srvcli(v),100)
-        if (type(new_alerts) is str):
-            print(new_alerts)
-        else:
-            for a in new_alerts:
-                new_alert(a)
+        req_str_hosts = u.request_builder_srvcli(v)
+        # 11 -> Longlived flows | 12 -> Lowgoodput
+        # Request first only Longlived flows
+        req_str = "(alert_id=11) AND (" + req_str_hosts + ")"
+        print("\n\n" + req_str)
+        # 5 hit per key are sufficient for our purposes
+        # Note that if there are, for example, four keys, thus maxhits = 4*5 = 20
+        # We might get 20 hits related to the same key.
+        # Not a big deal.
+        new_alerts = u.make_request(req_str,5 * len(v))
         
-    # TODO  x in longlived and x in lowgoodput
-    return {k: x
-    for k,v in dga_suspicious_domains.items() if len((x := list(filter(lambda x : x in longlived or x in lowgoodput, v.keys())))) > 1}
+        # Now request lowgoodput flows
+        req_str = "(alert_id=12) AND (" + req_str_hosts + ")"
+        print("\n\n" + req_str)
+        tmp = u.make_request(req_str, 5 * len(v))
+        if (type(tmp) is str):
+            print(tmp)
+            exit()
+        new_alerts += tmp
+        for a in new_alerts:
+            print(a["alert_id"],a["cli_ip"],a["cli_name"],a["vlan_id"])
+            # since 'alert_id = 11 OR alert_id = 12'
+            # each alert will be handled properly and put in longlived or lowgoodput
+            # new_alert(a)
+        
+    return {k: x for k, v in dga_suspicious_domains.items()
+            # We want to consider only DGAs in which the attacker is associated with long-lived low-goodput flows
+            if len((x := list(filter(lambda x: x[1] in longlived or x[1] in lowgoodput, v.keys())))) >= 1}
 
 # Stats calculation
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)

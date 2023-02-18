@@ -13,7 +13,6 @@ from ntopng.ntopng import Ntopng
 from ntopng.interface import Interface
 from ntopng.host import Host
 from ntopng.historical import Historical
-from ntopng.flow import Flow
 
 # My imports
 import datetime
@@ -98,8 +97,8 @@ except ValueError as e:
 
 try:
 
-    my_historical = Historical(my_ntopng)
-    t_end = datetime.datetime.now() - datetime.timedelta(minutes=180)
+    my_historical = Historical(my_ntopng,iface_id)
+    t_end = datetime.datetime.now() - datetime.timedelta(minutes=0)
     t_start = t_end - datetime.timedelta(minutes=30)
     time_dict = {
         "start" : t_start.strftime("%d/%m/%Y %H:%M:%S"),
@@ -110,12 +109,19 @@ try:
     # print(my_historical.get_flow_alerts(iface_id, t_start.strftime('%s'), t_end.strftime(
     #     '%s'), "*", "alert_id = 26", 20, "", ""))
     # print("\tSending request "  + t_start.strftime("%d/%m/%Y %H:%M:%S") + " --> " + t_end.strftime("%d/%m/%Y %H:%M:%S") )
-    raw_alerts = my_historical.get_flow_alerts(iface_id, t_start.strftime('%s'), t_end.strftime(
-        '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "")
+    # my_historical.self_test("192.168.1.12")
+
+    # rsp = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime('%s'), '*', "(alert_id=11 OR alert_id=12) AND (cli_name='ad01srvr.arcaspa.intra' AND vlan_id=11) OR (cli_ip = '172.30.11.12' AND vlan_id=11) OR (cli_name='srvunicommdc.unicomm.intra' AND vlan_id=2)", 10, '', '')
+    # rsp = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime('%s'), '*', "((alert_id=11 OR alert_id=12) AND ((cli_name='ad01srvr.arcaspa.intra' AND vlan_id=11) OR (cli_ip = '172.30.11.12' AND vlan_id=11) OR (cli_name='srvunicommdc.unicomm.intra' AND vlan_id=2)))", 10, '', '')
+    # for a in rsp:
+    #     print(a)
+
+    raw_alerts = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
+        '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "tstamp")
 
     print("First request done")
-    raw_alerts += my_historical.get_flow_alerts(iface_id, t_start.strftime('%s'), t_end.strftime(
-        '%s'), "*", "alert_id = 26", 200000, "", "")
+    raw_alerts += my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
+        '%s'), "*", "alert_id = 26", 2000000, "", "")
     print("Second request done")
     
 except ValueError as e:
