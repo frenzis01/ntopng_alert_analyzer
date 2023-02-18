@@ -37,15 +37,18 @@ bkt_srvcli_stats = {}
 GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
 
 def to_be_ignored(a):
-    EXCLUDED_VLAN = ["9","24","53","57","58","203"]
-    EXCLUDED_ALERTIDS = ["91",  # vlan_bidirectional_traffic
-                         "75"]  # connection_failed : Warning TCP Connection failed
+    EXCLUDED_VLAN = [9,24,53,57,58,203]
+    EXCLUDED_ALERTIDS = [91,  # vlan_bidirectional_traffic
+                         75]  # connection_failed : Warning TCP Connection failed
     if (a["vlan_id"] in EXCLUDED_VLAN or
         a["alert_id"] in EXCLUDED_ALERTIDS):
             return True
     return False
 
 def new_alert(a):
+    a["alert_id"] = int(a["alert_id"])
+    a["vlan_id"] = int(a["vlan_id"])
+    
     # check if has to be ignored
     try:
         if to_be_ignored(a):
@@ -55,13 +58,15 @@ def new_alert(a):
         # print(e)
         return
 
+    if (low_goodput_handler(a)
+        or long_lived_flow_handler(a)):
+        return
+
     # fix dtypes and remove unnecessary fields to improve performance
     remove_unwanted_fields(a)
     a_convert_dtypes(a)
 
-    if (unidirectional_handler(a) or
-        low_goodput_handler(a) or
-        long_lived_flow_handler(a)):
+    if unidirectional_handler(a):
         return
 
     # if unidirectional traffic but low severity discard
@@ -415,7 +420,6 @@ def a_convert_dtypes(a):
     a["srv_port"] = int(a["srv_port"])
     a["severity"] = int(a["severity"])
     a["cli2srv_bytes"] = int(a["cli2srv_bytes"])
-    a["vlan_id"] = int(a["vlan_id"])
     a["rowid"] = int(a["rowid"])
     a["ip_version"] = int(a["ip_version"])
     a["srv2cli_pkts"] = int(a["srv2cli_pkts"])
@@ -424,7 +428,6 @@ def a_convert_dtypes(a):
     a["score"] = int(a["score"])
     a["srv2cli_bytes"] = int(a["srv2cli_bytes"])
     a["cli_port"] = int(a["cli_port"])
-    a["alert_id"] = int(a["alert_id"])
     a["l7_proto"] = int(a["l7_proto"])
     a["proto"] = int(a["proto"])
 
@@ -497,18 +500,26 @@ def long_lived_flow_handler(a):
     if (a["alert_id"] != 11): # 11 : Long-lived Flow
         return False
     
-    k = u.get_id_vlan(a,GRP_SRVCLI)
+    k = u.get_id_vlan(a,GRP_CLI)
 
-    longlived[k] = a["tstamp"]
+    # longlived[k] = a["tstamp"]
+    # "tstamp" is not included in this case, since, for some odd reason,
+    # it cannot be put in the select statement of the query performed for
+    # this type of alert
+    longlived[k] = u.time_lower.strftime("%d-%m-%Y %H:%M:%S")
     return True
 
 def low_goodput_handler(a):
     if (a["alert_id"] != 12): # 12 : Low Goodput Ratio
         return False
     
-    k = u.get_id_vlan(a,GRP_SRVCLI)
+    k = u.get_id_vlan(a,GRP_CLI)
 
-    lowgoodput[k] = a["tstamp"]
+    # lowgoodput[k] = a["tstamp"]
+    # "tstamp" is not included in this case, since, for some odd reason,
+    # it cannot be put in the select statement of the query performed for
+    # this type of alert
+    lowgoodput[k] = u.time_lower.strftime("%d-%m-%Y %H:%M:%S")
     return True
 
 def get_unidir_probed():
@@ -543,7 +554,7 @@ def get_dga_sus_domains():
         # 11 -> Longlived flows | 12 -> Lowgoodput
         # Request first only Longlived flows
         req_str = "(alert_id=11) AND (" + req_str_hosts + ")"
-        print("\n\n" + req_str)
+        # print("\n\n" + req_str)
         # 5 hit per key are sufficient for our purposes
         # Note that if there are, for example, four keys, thus maxhits = 4*5 = 20
         # We might get 20 hits related to the same key.
@@ -552,21 +563,21 @@ def get_dga_sus_domains():
         
         # Now request lowgoodput flows
         req_str = "(alert_id=12) AND (" + req_str_hosts + ")"
-        print("\n\n" + req_str)
+        # print("\n\n" + req_str)
         tmp = u.make_request(req_str, 5 * len(v))
         if (type(tmp) is str):
             print(tmp)
             exit()
         new_alerts += tmp
         for a in new_alerts:
-            print(a["alert_id"],a["cli_ip"],a["cli_name"],a["vlan_id"])
+            # print(a["alert_id"],a["cli_ip"],a["cli_name"],a["vlan_id"])
             # since 'alert_id = 11 OR alert_id = 12'
             # each alert will be handled properly and put in longlived or lowgoodput
-            # new_alert(a)
+            new_alert(a)
         
     return {k: x for k, v in dga_suspicious_domains.items()
             # We want to consider only DGAs in which the attacker is associated with long-lived low-goodput flows
-            if len((x := list(filter(lambda x: x[1] in longlived or x[1] in lowgoodput, v.keys())))) >= 1}
+            if len((x := list(filter(lambda x: (x[1],x[2]) in longlived or (x[1],x[2]) in lowgoodput, v.keys())))) >= 1}
 
 # Stats calculation
 GRP_SRV, GRP_CLI, GRP_SRVCLI = range(3)

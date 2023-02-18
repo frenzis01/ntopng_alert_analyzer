@@ -136,14 +136,19 @@ def get_id_vlan(a,k:int) -> tuple:
    if(k not in range(3)):
       raise Exception("Invalid id: 0,1,2 (srv,cli,srvcli) available only")
    
-   srv_id = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
-   cli_id = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
-      
+   # srv or cli might be missing depending on 'a' value,
+   # (e.g. alert_id=11|12 => no srv fields) 
+   # so we must assign srv_id|cli_id only when strictly 
+   # necessary, to avoid KeyError  
    if (k == 0):
+      srv_id = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
       return (srv_id,a["vlan_id"])
    if (k == 1):
+      cli_id = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
       return (cli_id,a["vlan_id"])
    if (k == 2):
+      srv_id = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
+      cli_id = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
       return (srv_id,cli_id,a["vlan_id"])
 
 # @returns the longest sequence of subsequent common substrings
