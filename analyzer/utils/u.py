@@ -24,13 +24,6 @@ def get_value_from_keys(d, keys: list):
    return get_value_from_keys(d[key],keys)
 
 
-def is_server(vlan_id:int):
-   return vlan_id in [2,14]
-
-def is_client(vlan_id:int):
-   return vlan_id in [46,3]
-
-
 def low_level_info(alert):
    is_server(alert) and alert["alert_name"] in ["tls_certificate_selfsigned",
                            "ndpi_suspicious_dga_domain",

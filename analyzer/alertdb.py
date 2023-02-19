@@ -47,7 +47,7 @@ def to_be_ignored(a):
 
 def new_alert(a):
     a["alert_id"] = int(a["alert_id"])
-    a["vlan_id"] = int(a["vlan_id"])
+    a["vlan_id"] = int(a["vlan_id"]) if (a["vlan_id"] != "") else -1
     
     # check if has to be ignored
     try:
@@ -188,11 +188,16 @@ def is_relevant_singleton(a):
     # get marked as relevant
     global bat_paths
     if (alert_name == "binary_application_transfer"
-        and (path := ((u.get_BAT_path_server(a["json"]))[0])) != ""):
+        and (path_srvname := ((u.get_BAT_path_server(a["json"])))) != ("","")
+        # following line is only to assign path and srvname; walrus (:=) dsnt allow unpacking
+        #   i.e. `path, srvname := foo()` isn't allowed
+        and (path := path_srvname[0]) and (srvname := path_srvname[1])
+        and (not CONTEXT_INFO or not any(path.find(x) != -1 for x in ctx.BAT_PATH_WHITELIST))
+        and (not CONTEXT_INFO or not srvname in ctx.BAT_SERVER_WHITELIST)):
         # if not learning and previously unseen path
         if (LEARNING_PHASE == False and path not in bat_paths):
             # add path and srvcli to singleton alerts
-            sav[alert_name][path] = SRVCLI_ID
+            sav[alert_name][path] = SRVCLI_ID + ()
             # add to known paths
             bat_paths.add(path)
             return SRVCLI_ID
@@ -283,9 +288,10 @@ def is_relevant_singleton(a):
         and not (ip_address(a["srv_ip"]).is_private)):
         # and ja3_hash not in tls_self_ja3_tuples):
         key = SRV_ID
-        if (ja3_hash not in snd_grp[alert_name]):
-            snd_grp[alert_name][ja3_hash] = {}
-        snd_grp[alert_name][ja3_hash][key] = 1
+        # if (ja3_hash not in snd_grp[alert_name]):
+        #     snd_grp[alert_name][ja3_hash] = {}
+        # snd_grp[alert_name][ja3_hash][key] = 1
+        u.add_to_dict_dict_counter(snd_grp[alert_name],ja3_hash,key)
         # snd_grp[alert_name][ja3_hash] = (snd_grp[alert_name][ja3_hash][key] if (ja3_hash in snd_grp[alert_name]) else [key])
         # add to "known" ja3 hashes
         tls_self_ja3_tuples[ja3_hash] = key
@@ -401,6 +407,9 @@ def unidirectional_handler(a):
                                 and any("".join(o["proto"].keys()).find(app) != -1 for app in BIDIR_APP))):
         return False
 
+    # Consider only when the server possible victim is a private host
+    # if not ip_address(a["srv_ip"]).is_private:
+    #     return False
 
     # We are sure the alert indicates
     # Unidir traffic from client to server
@@ -444,7 +453,7 @@ def get_unidir_probed():
         # If a server is a victim of probing, one or more client will be trying to 
         # unidirectionally communicate with it on many different ports
         if (len(unidir[srv]) > MIN_PROBING_RELEVANT_SIZE and
-            u.is_server(srv[1]) and
+            is_server(srv[1]) and
             (s := u.shannon_entropy(list(map(lambda x: x[1],unidir[srv])))) > PROBING_ENTROPY_THRESH):
             probed[srv] = set(map(lambda x: x[0],unidir[srv]))
     return probed
@@ -595,14 +604,17 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
         
         paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + (u.get_id_vlan(x,GRP_SRVCLI),),s)
         if first_path != "":
+            # Check if the file transferred is always the same
             for p,srv_name,k in paths_servers_keys:
                 if p != first_path:
+                    # If not, exit
                     first_path = ""
                     break
         # get all servers
         for p,server_name,key in paths_servers_keys:
-            server_name = server_name if (server_name != "") else "-missing server name-"
-            u.add_to_dict_dict_counter(bat_server,server_name,str(key))
+            if (not CONTEXT_INFO or not server_name in ctx.BAT_SERVER_WHITELIST):
+                server_name = server_name if (server_name != "") else "-missing server name-"
+                u.add_to_dict_dict_counter(bat_server,server_name,str(key))
 
         d["bat_same_file"] = first_path
 
@@ -710,21 +722,20 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
     # srv uses always the same known port, while clients use ephimeral ones
     # We can set an entropy threshold to determine when srv and clients are
     # behaving oddly
-
     def is_odd(x,vlan_id):
         # Note: exclude not client-server paradigm associated alerts
         excludes = ["blacklisted"]
         if (GRP_CRIT != GRP_CLI 
             and x["alert_name"] not in excludes
             and x["srv_port_S"] >= CSODD_PORT_S_TH
-            and u.is_server(vlan_id)):
+            and is_server(vlan_id)):
             return "odd_server"
         # A client is odd if uses the SAME port with MANY servers
         if (GRP_CRIT != GRP_SRV 
             and x["alert_name"] not in excludes
             and x["cli_port_S"] <= CSODD_PORT_S_TH
             and x["srv_ip_S"] >= CSODD_IP_S_TH
-            and u.is_client(vlan_id)):
+            and is_client(vlan_id)):
             return "odd_client"
         return None
     
@@ -892,5 +903,10 @@ def get_hosts_noalertid(hosts: dict):
         except KeyError:
             tmp[key] = v
     return tmp
+
+def is_server(vlan_id:int):
+    return not CONTEXT_INFO or vlan_id in ctx.VLAN_SERVER
+def is_client(vlan_id:int):
+    return not CONTEXT_INFO or vlan_id in ctx.VLAN_CLIENT
 
 dict_init_alertnames()
