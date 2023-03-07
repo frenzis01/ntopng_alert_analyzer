@@ -50,16 +50,11 @@ def new_alert(a):
     a["vlan_id"] = int(a["vlan_id"]) if (a["vlan_id"] != "") else -1
     
     # check if has to be ignored
-    try:
-        if to_be_ignored(a):
-            return
-    except Exception as e:
-        print(a)
-        # print(e)
+    if to_be_ignored(a):
         return
 
-    if (low_goodput_handler(a)
-        or long_lived_flow_handler(a)):
+    if (low_goodput_handler(a) or
+        long_lived_flow_handler(a)):
         return
 
     # fix dtypes and remove unnecessary fields to improve performance
@@ -69,7 +64,8 @@ def new_alert(a):
     if unidirectional_handler(a):
         return
 
-    # if unidirectional traffic but low severity discard
+    # if unidirectional_handler(a) returned None but
+    # unidirectional traffic (and low severity) discard
     if (a["alert_id"] == 26 and a["severity"] <=4):
         return
 
@@ -84,7 +80,8 @@ def new_alert(a):
 
     # add to singleton groups
     global singleton
-    singleton = add_to_singleton(singleton,a)
+    # singleton = add_to_singleton(singleton,a)
+    is_relevant_singleton(a)
 
     if STREAMING_MODE:
         # TODO harvesting()
@@ -109,12 +106,13 @@ def add_to_bucket(alert, bkt, key):
 def add_to_singleton(bkt,alert):
     alert_name = get_alert_name(alert["json"])
     key = is_relevant_singleton(alert)
-    try:
-        x = bkt[key] # throws KeyError if not existing
-        bkt.pop(key, None)
-    except KeyError:
-        if key:
-            bkt[key] = (alert_name)
+    # AVOID updating singleton alerts
+    # try:
+    #     x = bkt[key] # throws KeyError if not existing
+    #     bkt.pop(key, None)
+    # except KeyError:
+    #     if key:
+            # bkt[key] = (alert_name)
     return bkt
 
 def harvesting(bound: dt.datetime):
@@ -157,13 +155,9 @@ def is_relevant_singleton(a):
     global sav,snd_grp
     alert_name = get_alert_name(a["json"])
     
-    CLI_ID = (a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"],
-              a["vlan_id"])
-    SRV_ID = (a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"],
-              a["vlan_id"])
-    SRVCLI_ID = (a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"],
-                 a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"],
-                 a["vlan_id"])
+    CLI_ID = u.get_id_vlan(a,GRP_CLI)
+    SRV_ID = u.get_id_vlan(a,GRP_SRV)
+    SRVCLI_ID = u.get_id_vlan(a,GRP_SRVCLI)
 
     def get_atk_key():
         k = SRVCLI_ID
@@ -177,11 +171,6 @@ def is_relevant_singleton(a):
             k = SRVCLI_ID
         return k
     
-    # We only care about the client in this case
-    if (alert_name == "ndpi_ssh_obsolete_client"):
-        # sav[alert_name].append(CLI_ID)
-        u.addremove_to_singleton(sav[alert_name],CLI_ID,1)
-        return CLI_ID
     
     # BAT is relevant if it concerns a previously unseen file
     # The learning phase must be over, otherwise every new transfer
@@ -194,6 +183,10 @@ def is_relevant_singleton(a):
         and (path := path_srvname[0]) and (srvname := path_srvname[1])
         and (not CONTEXT_INFO or not any(path.find(x) != -1 for x in ctx.BAT_PATH_WHITELIST))
         and (not CONTEXT_INFO or not srvname in ctx.BAT_SERVER_WHITELIST)):
+        # add to srvname grouping
+        srvname = srvname if (srvname != "") else "-missing server name-"
+        u.add_to_dict_dict_counter(bat_server,srvname,str(SRVCLI_ID))
+
         # if not learning and previously unseen path
         if (LEARNING_PHASE == False and path not in bat_paths):
             # add path and srvcli to singleton alerts
@@ -210,44 +203,6 @@ def is_relevant_singleton(a):
 
     key = get_atk_key()
     a_json = json.loads(a["json"])
-
-    # Interested in remote_to_local only when regarding remote access (score = 100),
-    # i.e. Telnet
-    # But there should be some other issues related, so the score should be higher
-    if (alert_name == "remote_to_local_insecure_proto" 
-        and a_json["ndpi_category_name"] == "RemoteAccess"
-        and a["score"] >= 180):
-        u.addremove_to_singleton(sav[alert_name],key,1)
-        return key
-    
-    # When sending clear-text credentials
-    # Consider only hosts which are using previously unseen usernames
-    def get_username():
-        flow_risk_info = json.loads(a_json["alert_generation"]["flow_risk_info"])
-        if ("36" in flow_risk_info
-            and "username" in flow_risk_info["36"]):
-            # Parse 'Found FTP username (USERNAME)'
-            i = flow_risk_info["36"].find('(')
-            return (flow_risk_info["36"][i+1:]
-                    .removesuffix(")"))
-        '''
-        TODO
-        Find a way to retrieve info when
-        "flow_risk_info": "{\"36\":\"Found credentials in HTTP Auth Line\"}"
-        '''
-        return None
-    global clear_text_usernames
-    if (alert_name == "ndpi_clear_text_credentials"
-    and (username := get_username()) ):
-    # and username not in clear_text_usernames):
-        if (username not in snd_grp[alert_name]):
-            snd_grp[alert_name][username] = {}
-        snd_grp[alert_name][username][key] = 1
-        # snd_grp[alert_name][username] = (snd_grp[alert_name][username][key] if (username in snd_grp[alert_name]) else [key])
-        # add to "known" usernames
-        clear_text_usernames[username] = key
-        # add username to key tuple
-        return key + (username,)
 
     def get_domain_name():
         flow_risk_info = json.loads(a_json["alert_generation"]["flow_risk_info"])
@@ -297,6 +252,55 @@ def is_relevant_singleton(a):
         tls_self_ja3_tuples[ja3_hash] = key
         # add domains to key tuple
         return key + (ja3_hash,)
+    
+
+
+    # The following are less relevant alerts
+
+    # We only care about the client in this case
+    if (alert_name == "ndpi_ssh_obsolete_client"):
+        # sav[alert_name].append(CLI_ID)
+        u.addremove_to_singleton(sav[alert_name],CLI_ID,1)
+        return CLI_ID
+
+    # Interested in remote_to_local only when regarding remote access (score = 100),
+    # i.e. Telnet
+    # But there should be some other issues related, so the score should be higher
+    if (alert_name == "remote_to_local_insecure_proto" 
+        and a_json["ndpi_category_name"] == "RemoteAccess"
+        and a["score"] >= 180):
+        u.addremove_to_singleton(sav[alert_name],key,1)
+        return key
+    
+    # When sending clear-text credentials
+    # Consider only hosts which are using previously unseen usernames
+    def get_username():
+        flow_risk_info = json.loads(a_json["alert_generation"]["flow_risk_info"])
+        if ("36" in flow_risk_info
+            and "username" in flow_risk_info["36"]):
+            # Parse 'Found FTP username (USERNAME)'
+            i = flow_risk_info["36"].find('(')
+            return (flow_risk_info["36"][i+1:]
+                    .removesuffix(")"))
+        '''
+        TODO
+        Find a way to retrieve info when
+        "flow_risk_info": "{\"36\":\"Found credentials in HTTP Auth Line\"}"
+        '''
+        return None
+    global clear_text_usernames
+    if (alert_name == "ndpi_clear_text_credentials"
+    and (username := get_username()) ):
+    # and username not in clear_text_usernames):
+        if (username not in snd_grp[alert_name]):
+            snd_grp[alert_name][username] = {}
+        snd_grp[alert_name][username][key] = 1
+        # snd_grp[alert_name][username] = (snd_grp[alert_name][username][key] if (username in snd_grp[alert_name]) else [key])
+        # add to "known" usernames
+        clear_text_usernames[username] = key
+        # add username to key tuple
+        return key + (username,)
+
 
     # "ndpi_http_suspicious_content" leads to a +100 score
     # In case of other simultaneous issues like non-std ports,
@@ -307,13 +311,16 @@ def is_relevant_singleton(a):
         return SRVCLI_ID
 
 
-    # if (alert_name in RELEVANT_SINGLETON_ALERTS):
-    if (alert_name not in IGNORE_SINGLETON_ALERTS):
-        if (alert_name not in sav):
-            sav[alert_name] = {}
-        # check if the key was already present
-        # if yes, it is not a singleton
-        u.addremove_to_singleton(sav[alert_name],key,1)
+
+    # Avoid considering other alert types
+
+    # # if (alert_name in RELEVANT_SINGLETON_ALERTS):
+    # if (alert_name not in IGNORE_SINGLETON_ALERTS):
+    #     if (alert_name not in sav):
+    #         sav[alert_name] = {}
+    #     # check if the key was already present
+    #     # if yes, it is not a singleton
+    #     u.addremove_to_singleton(sav[alert_name],key,1)
 
     
     return None
@@ -331,13 +338,6 @@ def get_singleton_alertview() -> dict:
                 else v))
                 
                 for k, v in sav.items()}
-
-def get_secondary_groupings() -> dict:
-    return {k: (u.str_key(v) if (type(v) is dict)
-                else (u.str_val(v) if (type(v) is list)
-                else v))
-                
-                for k, v in snd_grp.items()}
 
 def get_bkt_stats(BKT: int) -> dict:
     if (BKT not in range(3)):
@@ -361,7 +361,7 @@ def map_id_to_name(GRP_CRIT:int):
 
 
 def get_sup_level_alerts() -> dict:
-    
+    update_bkts_stats()
     sup_level_alerts = {"FLAT_GROUPINGS": {},
                         "BAT_ONE_TIME" : {},
                         "BAT_SERVER_NAMES": {},
@@ -520,6 +520,7 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
         try:
             return struct.unpack("!I", socket.inet_aton(x))[0]
         except:
+            # TODO ipv6
             print(x)
             return 0
     srv_ip_toN = list(map(ip_to_numeric,map(lambda x: x["srv_ip"],s)))
@@ -602,20 +603,14 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
         # get the first path
         first_path = (u.get_BAT_path_server(s[0]["json"]))[0]
         
-        paths_servers_keys = map(lambda x: u.get_BAT_path_server(x["json"]) + (u.get_id_vlan(x,GRP_SRVCLI),),s)
+        paths = map(lambda x: u.get_BAT_path_server(x["json"])[0],s)
         if first_path != "":
             # Check if the file transferred is always the same
-            for p,srv_name,k in paths_servers_keys:
+            for p in paths:
                 if p != first_path:
                     # If not, exit
                     first_path = ""
                     break
-        # get all servers
-        for p,server_name,key in paths_servers_keys:
-            if (not CONTEXT_INFO or not server_name in ctx.BAT_SERVER_WHITELIST):
-                server_name = server_name if (server_name != "") else "-missing server name-"
-                u.add_to_dict_dict_counter(bat_server,server_name,str(key))
-
         d["bat_same_file"] = first_path
 
     d["size"] = s_size

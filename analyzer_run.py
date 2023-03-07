@@ -122,6 +122,5 @@ from analyzer.alertdb import *
 # print("\tHandling alerts")
 for a in raw_alerts:
     new_alert(a)
-update_bkts_stats()
 
 print(json.dumps({"time" : time_dict} | get_sup_level_alerts(),indent=2))
