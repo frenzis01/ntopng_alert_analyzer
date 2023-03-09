@@ -47,7 +47,7 @@ IS_VICTIM_TH = 0.75
 MIN_PERIODIC_SIZE = 4
 # Upper bound on the coefficient of variation (aka relative stddev) on tdiff
 # to consider an alert flow periodic 
-PERIODIC_CV_THRESHOLD = 1.0
+PERIODIC_CV_THRESHOLD = 0.85
 # Entropy threshold on port and IPs to consider a host behavior odd
 # with respect to the client-server paradigm
 CSODD_PORT_S_TH   = 0.1
@@ -69,7 +69,7 @@ BIDIR_APP = ["http", "tls", "dns"]
 
 # Minimum number of unidirectional flows towards the same server
 # to consider it a probing victim 
-MIN_PROBING_RELEVANT_SIZE = 4
+MIN_PROBING_RELEVANT_SIZE = 10
 # Entropy threshold on the probed server PORTS the attackers (client) are
 # trying to connect to 
-PROBING_ENTROPY_THRESH = 0.5
+PROBING_ENTROPY_THRESH = 0.8

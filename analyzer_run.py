@@ -99,7 +99,7 @@ try:
 
     my_historical = Historical(my_ntopng,iface_id)
     t_end = datetime.datetime.now() - datetime.timedelta(minutes=0)
-    t_start = t_end - datetime.timedelta(minutes=30)
+    t_start = t_end - datetime.timedelta(minutes=myenv.WINDOW_SIZE_MINUTES)
     time_dict = {
         "start" : t_start.strftime("%d/%m/%Y %H:%M:%S"),
         "end" : t_end.strftime("%d/%m/%Y %H:%M:%S")
@@ -117,9 +117,7 @@ except ValueError as e:
     os._exit(-1)
 
 
-# from analyzer.alertdb import *
 from analyzer.alertdb import *
-# print("\tHandling alerts")
 for a in raw_alerts:
     new_alert(a)
 

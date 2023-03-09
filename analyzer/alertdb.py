@@ -16,7 +16,7 @@ from ipaddress import ip_address
 
 STREAMING_MODE = False
 LEARNING_PHASE = False
-CONTEXT_INFO = True
+CONTEXT_INFO = False
 
 bkt_srv = {}
 bkt_cli = {}
@@ -241,16 +241,9 @@ def is_relevant_singleton(a):
     if (alert_name == "tls_certificate_selfsigned"
         and (ja3_hash := get_ja3_hash()) 
         and not (ip_address(a["srv_ip"]).is_private)):
-        # and ja3_hash not in tls_self_ja3_tuples):
         key = SRV_ID
-        # if (ja3_hash not in snd_grp[alert_name]):
-        #     snd_grp[alert_name][ja3_hash] = {}
-        # snd_grp[alert_name][ja3_hash][key] = 1
         u.add_to_dict_dict_counter(snd_grp[alert_name],ja3_hash,key)
-        # snd_grp[alert_name][ja3_hash] = (snd_grp[alert_name][ja3_hash][key] if (ja3_hash in snd_grp[alert_name]) else [key])
-        # add to "known" ja3 hashes
-        tls_self_ja3_tuples[ja3_hash] = key
-        # add domains to key tuple
+        # add ja3 to key tuple
         return key + (ja3_hash,)
     
 
@@ -483,7 +476,7 @@ def get_dga_sus_domains():
         
         # Now request lowgoodput flows
         req_str = "(alert_id=12) AND (" + req_str_hosts + ")"
-        new_alerts = u.make_request(req_str, 5 * len(v))
+        new_alerts += u.make_request(req_str, 5 * len(v))
         for a in new_alerts:
             # since 'alert_id = 11 OR alert_id = 12'
             # each alert will be handled properly and put in longlived or lowgoodput
@@ -491,7 +484,7 @@ def get_dga_sus_domains():
         
     return {k: x for k, v in dga_suspicious_domains.items()
             # We want to consider only DGAs in which the attacker is associated with long-lived low-goodput flows
-            if len((x := list(filter(lambda x: (x[1],x[2]) in longlived or (x[1],x[2]) in lowgoodput, v.keys())))) >= 1}
+            if len((x := list(filter(lambda x: (x[1],x[2]) in longlived and (x[1],x[2]) in lowgoodput, v.keys())))) >= 1}
 
 # Stats calculation
 def get_alert_name(x):
