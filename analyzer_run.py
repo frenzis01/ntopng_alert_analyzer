@@ -32,7 +32,7 @@ import ast
 username = myenv.myusr
 password = myenv.mykey
 ntopng_url = myenv.myurl
-iface_id = 12  # 12 = all
+iface_id = myenv.myiface_id
 auth_token = None
 enable_debug = False
 host_ip = "192.168.1.1"  # useful only for -H option
