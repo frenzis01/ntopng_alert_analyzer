@@ -524,6 +524,10 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     d["cli_ip_S"] = u.shannon_entropy(cli_ip_toN)
     d["srv_port_S"] = u.shannon_entropy(list(map(lambda x: x["srv_port"],s)))
     d["cli_port_S"] = u.shannon_entropy(list(map(lambda x: x["cli_port"],s)))
+    
+    d["srv_port_count"] = len(set(map(lambda x: x["srv_port"],s)))
+    d["cli_port_count"] = len(set(map(lambda x: x["cli_port"],s)))
+
 
     # In case of SRV | CLI
     # If the other peer is always the same, this grouping will be found in SRVCLI
@@ -715,13 +719,15 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
         excludes = ["blacklisted"]
         if (GRP_CRIT != GRP_CLI 
             and x["alert_name"] not in excludes
-            and x["srv_port_S"] >= CSODD_PORT_S_TH
+            and x["srv_port_S"] >= SRV_ODD_PORT_S_TH
+            and x["srv_port_count"] >= SRV_ODD_PORT_COUNT_TH
             and is_server(vlan_id)):
             return "odd_server"
         # A client is odd if uses the SAME port with MANY servers
         if (GRP_CRIT != GRP_SRV 
             and x["alert_name"] not in excludes
-            and x["cli_port_S"] <= CSODD_PORT_S_TH
+            and x["cli_port_S"] <= CLI_ODD_PORT_S_TH
+            # and x["cli_port_count"] <= CSODD_PORT_COUNT_TH
             and x["srv_ip_S"] >= CSODD_IP_S_TH
             and is_client(vlan_id)):
             return "odd_client"

@@ -50,7 +50,9 @@ MIN_PERIODIC_SIZE = 4
 PERIODIC_CV_THRESHOLD = 0.85
 # Entropy threshold on port and IPs to consider a host behavior odd
 # with respect to the client-server paradigm
-CSODD_PORT_S_TH   = 0.1
+CLI_ODD_PORT_S_TH   = 0.1
+SRV_ODD_PORT_S_TH   = 0.8
+SRV_ODD_PORT_COUNT_TH   = 6
 CSODD_IP_S_TH     = 0.5
 # Upper bound on the coefficient of variation (aka relative stddev) on tdiff
 # to consider an alert flow periodic when comparing it with others who have similar periodicity
