@@ -773,6 +773,7 @@ def get_similar_periodicity(GRP_CRIT:int):
     periods = sorted({k: (v["tdiff_avg"], v["tdiff_CV"],v["alert_name"]) for (k, v) in bkt_s.items()
                       if (v["tdiff_CV"] < PERIODIC_SIMILAR_CV_THRESHOLD
                       and v["tdiff_CV"] > 0.0
+                      and v["tdiff_avg"] != "0:00:00"
                       and v["size"] > MIN_PERIODIC_SIZE
                       and v["alert_name"] not in excludes)}.items(),
                      key=lambda x: x[1][1])
