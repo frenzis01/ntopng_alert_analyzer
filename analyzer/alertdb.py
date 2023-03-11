@@ -78,8 +78,8 @@ def new_alert(a):
     bkt_cli = add_to_bucket(a,bkt_cli,(CLI_ID, a["vlan_id"], a["alert_id"]))
     bkt_srvcli = add_to_bucket(a,bkt_srvcli,(SRV_ID,CLI_ID, a["vlan_id"], a["alert_id"]))
 
-    # add to singleton groups
-    global singleton
+    # # add to singleton groups
+    # global singleton
     # singleton = add_to_singleton(singleton,a)
     is_relevant_singleton(a)
 
@@ -739,9 +739,10 @@ def get_simultaneous(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
     return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k,v) in bkt_s.items()
             # TODO v["tdiff_CV"] == 0 ok?
-            if ((v["tdiff_CV"] == 0
-                 or (v["tdiff_avg"] == "0:00:00" and v["tdiff_CV"] <= 0.5))
-            and v["size"] >= MIN_PERIODIC_SIZE)}
+            if ((
+                # v["tdiff_CV"] == 0 or
+                (v["tdiff_avg"] == "0:00:00" and v["tdiff_CV"] <= 0.5))
+                and v["size"] >= MIN_PERIODIC_SIZE)}
 
 
 def get_periodic(GRP_CRIT:int):
