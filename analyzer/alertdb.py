@@ -11,12 +11,14 @@ import itertools
 import re
 from .utils import u
 from .utils.c import *
-from .utils import ctx
+from .utils import ctx_ as ctx
 from ipaddress import ip_address
+
+import matplotlib.pyplot as plt
 
 STREAMING_MODE = False
 LEARNING_PHASE = False
-CONTEXT_INFO = False
+CONTEXT_INFO = True
 
 bkt_srv = {}
 bkt_cli = {}
@@ -37,6 +39,7 @@ bkt_srv_stats = {}
 bkt_cli_stats = {}
 bkt_srvcli_stats = {}
 
+sup_level_alerts = {}
 
 def to_be_ignored(a):
     if (CONTEXT_INFO and (
@@ -352,9 +355,132 @@ def map_id_to_name(GRP_CRIT:int):
     if (GRP_CRIT == GRP_SRVCLI):
         return "SRVCLI"
 
+def map_name_to_id(GRP_CRIT:str):
+    if (GRP_CRIT not in ["SRV","CLI","SRVCLI"]):
+        raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
+    if (GRP_CRIT == "SRV"):
+        return GRP_SRV
+    if (GRP_CRIT == "CLI"):
+        return GRP_CLI
+    if (GRP_CRIT == "SRVCLI"):
+        return GRP_SRVCLI
+
+
+
+def get_host_ratings(sup_alerts: dict):
+    hostsR = {}
+    
+    BAT_ONE_TIME_srv = 25
+    BAT_ONE_TIME_cli = 25
+    for key in sup_alerts["BAT_ONE_TIME"].values():
+        u.dict_incr(hostsR,(key[0],key[2]),BAT_ONE_TIME_srv)
+        u.dict_incr(hostsR,(key[1],key[2]),BAT_ONE_TIME_cli)
+    
+    DGA_DOMAINS_srv = 0
+    DGA_DOMAINS_cli = 20
+    for keys in sup_alerts["DGA_DOMAINS"].values():
+        for key in keys:
+            # u.dict_incr(hostsR,(key[0],key[2]),DGA_DOMAINS_srv)
+            u.dict_incr(hostsR,(key[1],key[2]),DGA_DOMAINS_cli)
+    
+    # PROBING_VICTIMS_srv = 0
+    PROBING_VICTIMS_cli = 15
+    print(sup_alerts["PROBING_VICTIMS"])
+    for attackers in sup_alerts["PROBING_VICTIMS"].values():
+        # u.dict_incr(hostsR,(key[0],key[2]),PROBING_VICTIMS_srv)
+        for key in attackers:
+            u.dict_incr(hostsR,(key[1],key[2]),PROBING_VICTIMS_cli)
+    
+    for grp_crit in sup_alerts["FLAT_GROUPINGS"]:
+        HIGHER_ALERT_TYPES_rate = 20
+        HIGHER_ALERT_TYPES_bonus = 20
+        def compute_HAT_rate(key,crit: str):
+            stats = get_bkt_stats(map_name_to_id(crit))
+            percentage = 1 - (stats[key]["tdiff_CV"]/PERIODIC_CV_THRESHOLD)
+            bonus = PERIODIC_bonus * percentage
+            return PERIODIC_rate + bonus
+
+            
+        for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["higher_alert_types"]:
+            if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
+                u.dict_incr(hostsR,(key[0],key[2]),HIGHER_ALERT_TYPES_rate)
+                u.dict_incr(hostsR,(key[1],key[2]),HIGHER_ALERT_TYPES_rate)
+            else: # SRV or CLI tuple 
+                u.dict_incr(hostsR,(key[0],key[1]),HIGHER_ALERT_TYPES_rate)
+
+        CS_PARADIGM_ODD_rate = 10
+        for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["cs_paradigm_odd"]:
+            if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
+                u.dict_incr(hostsR,(key[0],key[2]),CS_PARADIGM_ODD_rate)
+                u.dict_incr(hostsR,(key[1],key[2]),CS_PARADIGM_ODD_rate)
+            else: # SRV or CLI tuple 
+                u.dict_incr(hostsR,(key[0],key[1]),CS_PARADIGM_ODD_rate)
+
+        SIMULTANEOUS_rate = 50
+        for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["simultaneous"]:
+            if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
+                u.dict_incr(hostsR,(key[0],key[2]),SIMULTANEOUS_rate)
+                u.dict_incr(hostsR,(key[1],key[2]),SIMULTANEOUS_rate)
+            else: # SRV or CLI tuple 
+                u.dict_incr(hostsR,(key[0],key[1]),SIMULTANEOUS_rate)
+
+        PERIODIC_rate = 30
+        PERIODIC_bonus = 20
+        def compute_periodic_rate (key, crit:str):
+            stats = get_bkt_stats(map_name_to_id(crit))
+            percentage = 1 - (stats[key]["tdiff_CV"]/PERIODIC_CV_THRESHOLD)
+            bonus = PERIODIC_bonus * percentage
+            return PERIODIC_rate + bonus
+
+        for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["periodic"]:
+            if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
+                u.dict_incr(hostsR,(key[0],key[2]),compute_periodic_rate(key,grp_crit))
+                u.dict_incr(hostsR,(key[1],key[2]),compute_periodic_rate(key,grp_crit))
+            else: # SRV or CLI tuple 
+                u.dict_incr(hostsR,(key[0],key[1]),compute_periodic_rate(key,grp_crit))
+
+        SIMILAR_PERIODICITY_rate = 10
+        for key_list in sup_alerts["FLAT_GROUPINGS"][grp_crit]["similar_periodicity"].values():
+            for key in key_list: 
+                if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
+                    u.dict_incr(hostsR,(key[0],key[2]),SIMILAR_PERIODICITY_rate)
+                    u.dict_incr(hostsR,(key[1],key[2]),SIMILAR_PERIODICITY_rate)
+                else: # SRV or CLI tuple 
+                    u.dict_incr(hostsR,(key[0],key[1]),SIMILAR_PERIODICITY_rate)
+
+        BAT_SAMEFILE_srv = 20
+        BAT_SAMEFILE_cli = 20
+        for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["bat_samefile"]:
+            if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
+                u.dict_incr(hostsR,(key[0],key[2]),BAT_SAMEFILE_srv)
+                u.dict_incr(hostsR,(key[1],key[2]),BAT_SAMEFILE_cli)
+            elif(grp_crit == "SRV"): # SRV 
+                u.dict_incr(hostsR,(key[0],key[1]),BAT_SAMEFILE_srv)
+            elif(grp_crit == "CLI"): # CLI 
+                u.dict_incr(hostsR,(key[0],key[1]),BAT_SAMEFILE_cli)
+
+    # return dict(map(lambda x: (x[0],round(x[1],2)), sorted(hostsR.items(),key=lambda x: x[1],reverse=True)))
+    return dict(sorted(hostsR.items(),key=lambda x: x[1],reverse=True))
+
+def get_hosts_outliers(hostsR:dict):
+    ratings = list(hostsR.values())
+    q1 = np.quantile(ratings, .25)
+    q3 = np.quantile(ratings, .75)
+    iqr = q3-q1 # interquartile range
+    ub = q3 + 1 * iqr # upper bound
+
+    outliers = u.str_key({k:round(v,2) for k,v in hostsR.items() if v >= ub})
+    hosts = list(outliers.keys())
+    # plt.figure(figsize=(15,5))
+    plt.bar(range(len(hosts)),outliers.values(),0.7, color = 'g')
+    plt.xticks(range(len(hosts)), hosts, rotation=90)
+    plt.subplots_adjust(bottom=0.45)
+    plt.show()
+    return outliers
 
 def get_sup_level_alerts() -> dict:
     update_bkts_stats()
+    global sup_level_alerts
     sup_level_alerts = {"FLAT_GROUPINGS": {},
                         "BAT_ONE_TIME" : {},
                         "BAT_SERVER_NAMES": {},
@@ -363,21 +489,21 @@ def get_sup_level_alerts() -> dict:
                         "TLS_SELFSIGNERS_JA3" : {}}
     for grp_crit in [GRP_SRV, GRP_CLI, GRP_SRVCLI]:
         sup_level_alerts["FLAT_GROUPINGS"][map_id_to_name(grp_crit)] = {
-            "higher_alert_types" : u.str_key(get_higher_alert_types(grp_crit)),
-            # "tls_critical" : u.str_key(get_tls_critical(grp_crit)),
-            "cs_paradigm_odd" : u.str_key(get_cs_paradigm_odd(grp_crit)),
-            # "blk_peer" : u.str_key(get_blk_peer(grp_crit)),
-            "simultaneous" : u.str_key(get_simultaneous(grp_crit)),
-            "periodic" : u.str_key(get_periodic(grp_crit)),
+            "higher_alert_types" : get_higher_alert_types(grp_crit),
+            # "tls_critical" : get_tls_critical(grp_crit),
+            "cs_paradigm_odd" : get_cs_paradigm_odd(grp_crit),
+            # "blk_peer" : get_blk_peer(grp_crit),
+            "simultaneous" : get_simultaneous(grp_crit),
+            "periodic" : get_periodic(grp_crit),
             "similar_periodicity" : get_similar_periodicity(grp_crit),
-            "bat_samefile" : u.str_key(get_bat_samefile(grp_crit)),
+            "bat_samefile" : get_bat_samefile(grp_crit),
         }
     sup_level_alerts["BAT_ONE_TIME"] = sav["binary_application_transfer"]
     sup_level_alerts["BAT_SERVER_NAMES"] = bat_server
     sup_level_alerts["DGA_DOMAINS"] = get_dga_sus_domains()
     sup_level_alerts["PROBING_VICTIMS"] = get_unidir_probed()
     sup_level_alerts["TLS_SELFSIGNERS_JA3"] = snd_grp["tls_certificate_selfsigned"]
-    return u.str_key(sup_level_alerts)
+    return sup_level_alerts
 
 
 def unidirectional_handler(a):
@@ -673,7 +799,7 @@ def get_higher_alert_types(GRP_CRIT: int):
         return not is_victim
     
     #   Note: x should never be None, but it's safer to check regardless
-    relevant_keys = filter(lambda x: x and len(x) > 1 and is_relevant(x),bkt.keys())
+    relevant_keys = filter(lambda x: x and len(x) >= 1 and is_relevant(x),bkt.keys())
     
     # Count the number of alert_types for each group ("ip","vlan_id") or ("srv","cli","vlan_id")
     nat = Counter(map(lambda x: ((x[0],x[1]) if len(x) == 3 else (x[0],x[1],x[2])), relevant_keys))

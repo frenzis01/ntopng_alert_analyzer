@@ -78,7 +78,6 @@ def str_to_timedelta(s: str) -> dt.timedelta:
     total_sec = d.hour*3600 + d.minute*60 + d.second  # total seconds calculation
     return dt.timedelta(seconds=total_sec)
 
-
 def request_builder_srvcli(keys: list):
    if (len(keys) == 0):
       return ""
@@ -217,6 +216,11 @@ def add_to_domain_dict(d:dict,name:str,key):
    d[new_name] = d.pop(best_match_name,{})
    d[new_name][key] = 0
    return new_name
+
+def dict_incr(d:dict,key:str,value:int):
+   if key not in d:
+      d[key] = 0
+   d[key] += value
 
 # Note that entropy is normalized and ranges from 0 to 1
 def shannon_entropy(data):

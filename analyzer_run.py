@@ -19,7 +19,7 @@ import datetime
 import json
 import pandas as pd
 from types import SimpleNamespace
-import myenv
+import myenv_ as myenv
 from IPython.display import display
 import math
 from scipy.stats import entropy
@@ -121,4 +121,9 @@ from analyzer.alertdb import *
 for a in raw_alerts:
     new_alert(a)
 
-print(json.dumps({"time" : time_dict} | get_sup_level_alerts(),indent=2))
+from analyzer.utils.u import str_key
+
+sup_level_alerts = get_sup_level_alerts()
+hostsR = get_host_ratings(sup_level_alerts)
+print(json.dumps({"time" : time_dict} | str_key(sup_level_alerts),indent=2))
+print(json.dumps(str_key(get_hosts_outliers(hostsR)),indent=2))

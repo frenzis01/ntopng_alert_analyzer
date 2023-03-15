@@ -5,7 +5,7 @@ GRP_SRV,GRP_CLI,GRP_SRVCLI = range(3)
 
 # Alert categories
 
-TLS_ALERTS = ["tls_certificate_expired","tls_certificate_mismatch","tls_old_protocol_version","tls_unsafe_ciphers"]
+TLS_ALERTS = ["tls_certificate_expired","tls_certificate_mismatch","ndpi_tls_old_protocol_version","tls_unsafe_ciphers"]
 
 # Singleton alerts are alerts which are relevant if received only one time (per srv/cli)
 RELEVANT_SINGLETON_ALERTS = [
@@ -44,10 +44,10 @@ MIN_BKT_RELEVANT_SIZE = 3
 # Minimum percentage of 'is_victim' before considering a host a victim
 IS_VICTIM_TH = 0.75
 # Minimum number of alerts in a flow to consider it periodic
-MIN_PERIODIC_SIZE = 4
+MIN_PERIODIC_SIZE = 3
 # Upper bound on the coefficient of variation (aka relative stddev) on tdiff
 # to consider an alert flow periodic 
-PERIODIC_CV_THRESHOLD = 0.85
+PERIODIC_CV_THRESHOLD = 0.9
 # Entropy threshold on port and IPs to consider a host behavior odd
 # with respect to the client-server paradigm
 CLI_ODD_PORT_S_TH   = 0.1
