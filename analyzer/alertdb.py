@@ -20,26 +20,43 @@ STREAMING_MODE = False
 LEARNING_PHASE = False
 CONTEXT_INFO = True
 
-bkt_srv = {}
-bkt_cli = {}
-bkt_srvcli = {}
+def init():
+    global bkt_srv,bkt_cli,bkt_srvcli
+    bkt_srv = {}
+    bkt_cli = {}
+    bkt_srvcli = {}
 
-singleton = {}
-sav = {}        # Singleton Alert View
-snd_grp = {}    # Secondary groupings
-unidir = {}     # Unidirectional traffic notice
-longlived = {}  # Long-lived flows notice
-lowgoodput = {} # Low goodput ratio notice
+    global singleton,sav,snd_grp,unidir,longlived,lowgoodput
+    singleton = {}
+    sav = {}        # Singleton Alert View
+    snd_grp = {}    # Secondary groupings
+    unidir = {}     # Unidirectional traffic notice
+    longlived = {}  # Long-lived flows notice
+    lowgoodput = {} # Low goodput ratio notice
+
+    global bat_paths,bat_server,bkt_srv_stats,bkt_cli_stats,bkt_srvcli_stats,sup_level_alerts
+    bat_paths = set()
+    bat_server = {}
+    bkt_srv_stats = {}
+    bkt_cli_stats = {}
+    bkt_srvcli_stats = {}
+    sup_level_alerts = {}
+
+    dict_init_alertnames()
 
 
-bat_paths = set()
-bat_server = {}
+def dict_init_alertnames():
+    sav["ndpi_ssh_obsolete_client"] = {}
+    sav["ndpi_http_suspicious_content"] = {}
+    sav["remote_to_local_insecure_proto"] = {}
+    sav["binary_application_transfer"] = {}
+    snd_grp["ndpi_clear_text_credentials"] = {}
+    snd_grp["ndpi_suspicious_dga_domain"] = {}
+    snd_grp["tls_certificate_selfsigned"] = {}
+    
 
-bkt_srv_stats = {}
-bkt_cli_stats = {}
-bkt_srvcli_stats = {}
 
-sup_level_alerts = {}
+init()
 
 def to_be_ignored(a):
     if (CONTEXT_INFO and (
@@ -127,7 +144,7 @@ def harvesting(bound: dt.datetime):
     bkt_srv = {k:harvested_v for (k,v) in bkt_srv.items() if len(harvested_v := list(filter(to_harvest,v)))}
     bkt_cli = {k:harvested_v for (k,v) in bkt_cli.items() if len(harvested_v := list(filter(to_harvest,v)))}
     bkt_srvcli = {k:harvested_v for (k,v) in bkt_srvcli.items() if len(harvested_v := list(filter(to_harvest,v)))}
-    
+
 
 # GETTERS
 def get_bkt(BKT: int) -> dict:
@@ -143,16 +160,6 @@ def get_bkt(BKT: int) -> dict:
 clear_text_usernames = {}
 dga_suspicious_domains = {}
 tls_self_ja3_tuples = {}
-
-def dict_init_alertnames():
-    sav["ndpi_ssh_obsolete_client"] = {}
-    sav["ndpi_http_suspicious_content"] = {}
-    sav["remote_to_local_insecure_proto"] = {}
-    sav["binary_application_transfer"] = {}
-    snd_grp["ndpi_clear_text_credentials"] = {}
-    snd_grp["ndpi_suspicious_dga_domain"] = {}
-    snd_grp["tls_certificate_selfsigned"] = {}
-    
 
 def is_relevant_singleton(a):
     global sav,snd_grp
@@ -385,7 +392,7 @@ def get_host_ratings(sup_alerts: dict):
     
     # PROBING_VICTIMS_srv = 0
     PROBING_VICTIMS_cli = 15
-    print(sup_alerts["PROBING_VICTIMS"])
+    # print(sup_alerts["PROBING_VICTIMS"])
     for attackers in sup_alerts["PROBING_VICTIMS"].values():
         # u.dict_incr(hostsR,(key[0],key[2]),PROBING_VICTIMS_srv)
         for key in attackers:
@@ -472,10 +479,10 @@ def get_hosts_outliers(hostsR:dict):
     outliers = u.str_key({k:round(v,2) for k,v in hostsR.items() if v >= ub})
     hosts = list(outliers.keys())
     # plt.figure(figsize=(15,5))
-    plt.bar(range(len(hosts)),outliers.values(),0.7, color = 'g')
-    plt.xticks(range(len(hosts)), hosts, rotation=90)
-    plt.subplots_adjust(bottom=0.45)
-    plt.show()
+    # plt.bar(range(len(hosts)),outliers.values(),0.7, color = 'g')
+    # plt.xticks(range(len(hosts)), hosts, rotation=90)
+    # plt.subplots_adjust(bottom=0.45)
+    # plt.show()
     return outliers
 
 def get_sup_level_alerts() -> dict:
@@ -640,7 +647,7 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
             return struct.unpack("!I", socket.inet_aton(x))[0]
         except:
             # TODO ipv6
-            print(x)
+            # print(x)
             return 0
     srv_ip_toN = list(map(ip_to_numeric,map(lambda x: x["srv_ip"],s)))
     cli_ip_toN = list(map(ip_to_numeric,map(lambda x: x["cli_ip"],s)))
@@ -1031,4 +1038,4 @@ def is_server(vlan_id:int):
 def is_client(vlan_id:int):
     return not CONTEXT_INFO or vlan_id in ctx.VLAN_CLIENT
 
-dict_init_alertnames()
+# dict_init_alertnames()
