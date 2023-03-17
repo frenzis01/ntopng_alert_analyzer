@@ -4,6 +4,8 @@ import datetime as dt
 from scipy.stats import entropy
 from collections import Counter
 
+import numpy as np
+
 from ipaddress import ip_address,IPv4Address
 
 my_historical = iface_id = time_lower = time_upper = None
@@ -238,6 +240,89 @@ def shannon_entropy(data):
    l = len(frequency_dict)
    S_entropy = 0 if l == 1 else entropy(probabilities, base=l)
    return S_entropy
+
+# @param hosts_ts is a dict made as {host1 : [rating0, rating30min, rating60min, ...], ...}
+# @param hosts_r is a dict containting the update, { host1: current_rating, ...}
+def new_hostsR_handler(hosts_ts:dict,host_r:dict):
+   # how many iterations have we already performed?
+   len_TimeWindow = len(list(hosts_ts.values())[0]) if (len(hosts_ts)) else 0
+   for k,v in host_r.items():
+      # if host was not previously observed
+      if k not in hosts_ts:
+         # fill with zeros
+         # hosts_ts[k] = [0] * len_TimeWindow
+         # fill with the first value known
+         hosts_ts[k] = [v] * (len_TimeWindow-1)
+      hosts_ts[k] += [v]
+   
+   # if no update in host_r for some keys,
+   # then add zero
+   for k in hosts_ts.keys():
+      if k not in host_r:
+         # no update in host_r
+         # add zero
+         hosts_ts[k] += [0]
+
+def hostsR_outlier(hosts_ts:dict):
+   outlier_hosts = {}
+   for host,ratings in hosts_ts.items():
+      # print("host and rating" + str((host,ratings) ))
+      # hoti = host_outlier_time_indices
+      hoti = detect_outliers_wma(ratings,15)
+      if hoti:
+         outlier_hosts[host] = [hoti, list(map(lambda x: round(x,2),ratings))]   
+   return outlier_hosts
+
+
+def detect_outliers_wma(data, threshold:int, window_size=5, sigma=2):
+   """
+   This function detects outliers in a list of numbers using the weighted moving average WMA.
+   
+   data: list of numbers
+   window_size: size of the window used for the moving average
+   sigma: number of standard deviations from the moving average to use as a threshold for outlier detection
+   threshold: values below this threshold will be excluded from outlier detection
+   
+   returns: list of outlier indices
+   """
+   
+   # If data has less than window_size elements, return an empty list
+   if len(data) < window_size:
+       return []
+   
+   # Check if the first n elements of data are equal and the remaining elements are all 0
+   n = window_size - 1
+   if len(data) > n and all(x == data[0] for x in data[:n]) and all(x == 0 for x in data[n:]):
+       return []
+   
+   # Calculate the weighted moving average
+   weights = np.arange(1, window_size+1)
+   wma = np.convolve(data, weights, mode='valid') / weights.sum()
+   
+   # Calculate the deviation from the weighted moving average
+   deviation = np.abs(data[window_size-1:] - wma)
+   
+   # Calculate the standard deviation of the deviation
+   std_dev = np.std(deviation)
+   
+   # Check that the standard deviation is not zero
+   if std_dev == 0:
+       return []
+   
+   # Calculate the threshold for outlier detection
+   threshold = sigma * std_dev
+   
+   # Find the outliers
+   outliers = np.where(deviation > threshold)[0] + window_size-1
+   # outliers.tolist()
+   
+   # If threshold is None
+   # Exclude values below threshold from data
+   if threshold is not None:
+      outliers = [x for x in outliers if data[x] >= threshold]
+   
+   
+   return outliers   
 
 
 # New alert handling UTILITIES 
