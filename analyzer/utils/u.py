@@ -252,7 +252,7 @@ def new_hostsR_handler(hosts_ts:dict,host_r:dict):
          # fill with zeros
          # hosts_ts[k] = [0] * len_TimeWindow
          # fill with the first value known
-         hosts_ts[k] = [v] * (len_TimeWindow-1)
+         hosts_ts[k] = [0] * (len_TimeWindow-1)
       hosts_ts[k] += [v]
    
    # if no update in host_r for some keys,
@@ -268,23 +268,30 @@ def hostsR_outlier(hosts_ts:dict):
    for host,ratings in hosts_ts.items():
       # print("host and rating" + str((host,ratings) ))
       # hoti = host_outlier_time_indices
-      hoti = detect_outliers_wma(ratings,15)
+      hoti = detect_outliers_wma(ratings,lower_bound=40)
       if hoti:
          outlier_hosts[host] = [hoti, list(map(lambda x: round(x,2),ratings))]   
    return outlier_hosts
 
 
-def detect_outliers_wma(data, threshold:int, window_size=5, sigma=2):
+def detect_outliers_wma(values:list, lower_bound:int, window_size=5, sigma=3):
    """
    This function detects outliers in a list of numbers using the weighted moving average WMA.
    
    data: list of numbers
    window_size: size of the window used for the moving average
    sigma: number of standard deviations from the moving average to use as a threshold for outlier detection
-   threshold: values below this threshold will be excluded from outlier detection
+   lower_bound: values below this threshold will be excluded from outlier detection
    
    returns: list of outlier indices
    """
+   data = list(values)
+
+   leading_zeros = 0
+   while len(data) > 0 and data[0] == 0:
+      data.pop(0)
+      leading_zeros += 1
+   
    
    # If data has less than window_size elements, return an empty list
    if len(data) < window_size:
@@ -318,11 +325,15 @@ def detect_outliers_wma(data, threshold:int, window_size=5, sigma=2):
    
    # If threshold is None
    # Exclude values below threshold from data
-   if threshold is not None:
-      outliers = [x for x in outliers if data[x] >= threshold]
-   
-   
-   return outliers   
+   if lower_bound is not None:
+      outliers = [x for x in outliers if data[x] >= lower_bound]
+
+   # Check if last element is an actual outlier or not   
+   if len(outliers) and (data[-1] < threshold or abs(data[-1] - wma[-1]) <= threshold):
+      outliers.pop()
+
+
+   return list(map(lambda x: x + leading_zeros,outliers))
 
 
 # New alert handling UTILITIES 
