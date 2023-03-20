@@ -380,23 +380,22 @@ def get_host_ratings(sup_alerts: dict):
     BAT_ONE_TIME_srv = 25
     BAT_ONE_TIME_cli = 25
     for key in sup_alerts["BAT_ONE_TIME"].values():
-        u.dict_incr(hostsR,(key[0],key[2]),BAT_ONE_TIME_srv)
-        u.dict_incr(hostsR,(key[1],key[2]),BAT_ONE_TIME_cli)
+        u.dict_incr(hostsR,(key[0],key[2]),BAT_ONE_TIME_srv,"BAT_ONE_TIME")
+        u.dict_incr(hostsR,(key[1],key[2]),BAT_ONE_TIME_cli,"BAT_ONE_TIME")
     
     DGA_DOMAINS_srv = 0
     DGA_DOMAINS_cli = 20
     for keys in sup_alerts["DGA_DOMAINS"].values():
         for key in keys:
             # u.dict_incr(hostsR,(key[0],key[2]),DGA_DOMAINS_srv)
-            u.dict_incr(hostsR,(key[1],key[2]),DGA_DOMAINS_cli)
+            u.dict_incr(hostsR,(key[1],key[2]),DGA_DOMAINS_cli,"DGA_DOMAINS")
     
     # PROBING_VICTIMS_srv = 0
     PROBING_VICTIMS_cli = 15
-    # print(sup_alerts["PROBING_VICTIMS"])
     for attackers in sup_alerts["PROBING_VICTIMS"].values():
         # u.dict_incr(hostsR,(key[0],key[2]),PROBING_VICTIMS_srv)
         for key in attackers:
-            u.dict_incr(hostsR,(key[1],key[2]),PROBING_VICTIMS_cli)
+            u.dict_incr(hostsR,(key[1],key[2]),PROBING_VICTIMS_cli,"PROBING_VICTIMS")
     
     for grp_crit in sup_alerts["FLAT_GROUPINGS"]:
         HIGHER_ALERT_TYPES_rate = 20
@@ -410,26 +409,26 @@ def get_host_ratings(sup_alerts: dict):
             
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["higher_alert_types"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),HIGHER_ALERT_TYPES_rate)
-                u.dict_incr(hostsR,(key[1],key[2]),HIGHER_ALERT_TYPES_rate)
+                u.dict_incr(hostsR,(key[0],key[2]),HIGHER_ALERT_TYPES_rate,"higher_alert_types")
+                u.dict_incr(hostsR,(key[1],key[2]),HIGHER_ALERT_TYPES_rate,"higher_alert_types")
             else: # SRV or CLI tuple 
-                u.dict_incr(hostsR,(key[0],key[1]),HIGHER_ALERT_TYPES_rate)
+                u.dict_incr(hostsR,(key[0],key[1]),HIGHER_ALERT_TYPES_rate,"higher_alert_types")
 
         CS_PARADIGM_ODD_rate = 10
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["cs_paradigm_odd"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),CS_PARADIGM_ODD_rate)
-                u.dict_incr(hostsR,(key[1],key[2]),CS_PARADIGM_ODD_rate)
+                u.dict_incr(hostsR,(key[0],key[2]),CS_PARADIGM_ODD_rate,"cs_paradigm_odd")
+                u.dict_incr(hostsR,(key[1],key[2]),CS_PARADIGM_ODD_rate,"cs_paradigm_odd")
             else: # SRV or CLI tuple 
-                u.dict_incr(hostsR,(key[0],key[1]),CS_PARADIGM_ODD_rate)
+                u.dict_incr(hostsR,(key[0],key[1]),CS_PARADIGM_ODD_rate,"cs_paradigm_odd")
 
         SIMULTANEOUS_rate = 50
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["simultaneous"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),SIMULTANEOUS_rate)
-                u.dict_incr(hostsR,(key[1],key[2]),SIMULTANEOUS_rate)
+                u.dict_incr(hostsR,(key[0],key[2]),SIMULTANEOUS_rate,"simultaneous")
+                u.dict_incr(hostsR,(key[1],key[2]),SIMULTANEOUS_rate,"simultaneous")
             else: # SRV or CLI tuple 
-                u.dict_incr(hostsR,(key[0],key[1]),SIMULTANEOUS_rate)
+                u.dict_incr(hostsR,(key[0],key[1]),SIMULTANEOUS_rate,"simultaneous")
 
         PERIODIC_rate = 30
         PERIODIC_bonus = 20
@@ -441,33 +440,33 @@ def get_host_ratings(sup_alerts: dict):
 
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["periodic"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),compute_periodic_rate(key,grp_crit))
-                u.dict_incr(hostsR,(key[1],key[2]),compute_periodic_rate(key,grp_crit))
+                u.dict_incr(hostsR,(key[0],key[2]),compute_periodic_rate(key,grp_crit),"periodic")
+                u.dict_incr(hostsR,(key[1],key[2]),compute_periodic_rate(key,grp_crit),"periodic")
             else: # SRV or CLI tuple 
-                u.dict_incr(hostsR,(key[0],key[1]),compute_periodic_rate(key,grp_crit))
+                u.dict_incr(hostsR,(key[0],key[1]),compute_periodic_rate(key,grp_crit),"periodic")
 
         SIMILAR_PERIODICITY_rate = 10
         for key_list in sup_alerts["FLAT_GROUPINGS"][grp_crit]["similar_periodicity"].values():
             for key in key_list: 
                 if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                    u.dict_incr(hostsR,(key[0],key[2]),SIMILAR_PERIODICITY_rate)
-                    u.dict_incr(hostsR,(key[1],key[2]),SIMILAR_PERIODICITY_rate)
+                    u.dict_incr(hostsR,(key[0],key[2]),SIMILAR_PERIODICITY_rate,"similar_periodicity")
+                    u.dict_incr(hostsR,(key[1],key[2]),SIMILAR_PERIODICITY_rate,"similar_periodicity")
                 else: # SRV or CLI tuple 
-                    u.dict_incr(hostsR,(key[0],key[1]),SIMILAR_PERIODICITY_rate)
+                    u.dict_incr(hostsR,(key[0],key[1]),SIMILAR_PERIODICITY_rate,"similar_periodicity")
 
         BAT_SAMEFILE_srv = 20
         BAT_SAMEFILE_cli = 20
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["bat_samefile"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),BAT_SAMEFILE_srv)
-                u.dict_incr(hostsR,(key[1],key[2]),BAT_SAMEFILE_cli)
+                u.dict_incr(hostsR,(key[0],key[2]),BAT_SAMEFILE_srv,"bat_samefile")
+                u.dict_incr(hostsR,(key[1],key[2]),BAT_SAMEFILE_cli,"bat_samefile")
             elif(grp_crit == "SRV"): # SRV 
-                u.dict_incr(hostsR,(key[0],key[1]),BAT_SAMEFILE_srv)
+                u.dict_incr(hostsR,(key[0],key[1]),BAT_SAMEFILE_srv,"bat_samefile")
             elif(grp_crit == "CLI"): # CLI 
-                u.dict_incr(hostsR,(key[0],key[1]),BAT_SAMEFILE_cli)
+                u.dict_incr(hostsR,(key[0],key[1]),BAT_SAMEFILE_cli,"bat_samefile")
 
     # return dict(map(lambda x: (x[0],round(x[1],2)), sorted(hostsR.items(),key=lambda x: x[1],reverse=True)))
-    return dict(sorted(hostsR.items(),key=lambda x: x[1],reverse=True))
+    return dict(sorted(hostsR.items(),key=lambda x: x[1]["total"],reverse=True))
 
 def get_hosts_outliers(hostsR:dict):
     ratings = list(hostsR.values())

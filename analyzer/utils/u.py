@@ -5,6 +5,7 @@ from scipy.stats import entropy
 from collections import Counter
 
 import numpy as np
+import statistics
 
 from ipaddress import ip_address,IPv4Address
 
@@ -219,10 +220,14 @@ def add_to_domain_dict(d:dict,name:str,key):
    d[new_name][key] = 0
    return new_name
 
-def dict_incr(d:dict,key:str,value:int):
+def dict_incr(d:dict,key:str,value:int,feature:str):
    if key not in d:
-      d[key] = 0
-   d[key] += value
+      d[key] = {"total" : 0}
+   if feature not in d[key]:
+      d[key][feature] = 0
+   
+   d[key][feature] += value
+   d[key]["total"] += value
 
 # Note that entropy is normalized and ranges from 0 to 1
 def shannon_entropy(data):
@@ -253,7 +258,7 @@ def new_hostsR_handler(hosts_ts:dict,host_r:dict):
          # hosts_ts[k] = [0] * len_TimeWindow
          # fill with the first value known
          hosts_ts[k] = [0] * (len_TimeWindow-1)
-      hosts_ts[k] += [v]
+      hosts_ts[k] += [v["total"]]
    
    # if no update in host_r for some keys,
    # then add zero
@@ -263,7 +268,7 @@ def new_hostsR_handler(hosts_ts:dict,host_r:dict):
          # add zero
          hosts_ts[k] += [0]
 
-def hostsR_outlier(hosts_ts:dict):
+def hostsR_outlier_wma(hosts_ts:dict):
    outlier_hosts = {}
    for host,ratings in hosts_ts.items():
       # print("host and rating" + str((host,ratings) ))
@@ -273,6 +278,45 @@ def hostsR_outlier(hosts_ts:dict):
          outlier_hosts[host] = [hoti, list(map(lambda x: round(x,2),ratings))]   
    return outlier_hosts
 
+def hostsR_outlier_mad(hosts_ts:dict):
+   outlier_hosts = {}
+   for host,ratings in hosts_ts.items():
+      # print("host and rating" + str((host,ratings) ))
+      # hoti = host_outlier_time_indices
+      hoti = detect_outliers_mad_modified(ratings)
+      if hoti:
+         outlier_hosts[host] = [hoti, list(map(lambda x: round(x,2),ratings))]   
+      
+   return outlier_hosts
+
+
+def detect_outliers_iqr(data, threshold=1.5):
+    """
+    This function detects outliers in a list of numbers using the interquartile range (IQR).
+   
+    data: list of numbers
+    threshold: number of IQRs from the median to use as a threshold for outlier detection
+   
+    returns: list of outlier indices
+    """
+    
+    # Convert the data to a numpy array
+    data = np.array(data)
+    
+    # Calculate the quartiles
+    q1, q3 = np.percentile(data, [25, 75])
+    
+    # Calculate the IQR
+    iqr = q3 - q1
+    
+    # Calculate the lower and upper bounds
+    lower_bound = q1 - threshold * iqr
+    upper_bound = q3 + threshold * iqr
+    
+    # Find the outliers
+    outliers = np.where((data < lower_bound) | (data > upper_bound))[0]
+    
+    return outliers.tolist()
 
 def detect_outliers_wma(values:list, lower_bound:int, window_size=5, sigma=3):
    """
@@ -335,6 +379,36 @@ def detect_outliers_wma(values:list, lower_bound:int, window_size=5, sigma=3):
 
    return list(map(lambda x: x + leading_zeros,outliers))
 
+
+def detect_outliers_mad_modified(data, threshold=3.5):
+    """
+    This function detects outliers in a list of numbers using the modified z-score method with MAD.
+    It excludes the first elements of data that are equal to 0 and does not consider the last element as an outlier.
+
+    data: list of numbers
+    threshold: modified z-score threshold for outlier detection
+
+    returns: list of outlier indices
+    """
+    # Exclude first elements equal to 0
+    first_non_zero_idx = next((i for i, x in enumerate(data) if x != 0), len(data))
+    data = data[first_non_zero_idx:]
+
+    # Calculate median and MAD
+    median = statistics.median(data)
+    deviations = [abs(x - median) for x in data]
+    MAD = statistics.median(deviations)
+
+    # Calculate modified z-score
+    if MAD == 0:
+        modified_z_scores = [0] * len(data)
+    else:
+        modified_z_scores = [0.6745 * (x - median) / MAD for x in data]
+
+    # Find outliers
+    outliers = [i + first_non_zero_idx for i, x in enumerate(modified_z_scores) if abs(x) > threshold and i != len(modified_z_scores)-1]
+
+    return outliers
 
 # New alert handling UTILITIES 
 def a_convert_dtypes(a):
