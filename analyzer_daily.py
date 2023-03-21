@@ -14,9 +14,15 @@ import json
 import myenv_ as myenv
 
 
-from analyzer.utils.u import new_hostsR_handler
-from analyzer.utils.u import hostsR_outlier
-from analyzer.utils.u import str_key
+# from analyzer.utils.u import new_hostsR_handler
+# from analyzer.utils.u import hostsR_outlier_wma
+# from analyzer.utils.u import hostsR_outlier_mad
+# from analyzer.utils.u import plot_outliers
+# from analyzer.utils.u import get_outliers_features
+
+# from analyzer.utils.u import str_key
+# from analyzer.utils.u import remove_unwanted_fields
+from analyzer.utils.u import *
 
 FILE_INPUT = True
 
@@ -86,16 +92,26 @@ if not FILE_INPUT:
 hosts_ts = {}
 hosts_ratings = []
 all_raw_alerts = []
+all_time_dict = []
 if not FILE_INPUT:
+    f = open("alerts.json","w")
+    f.write("[")
+    f.close()
+
+    f = open("alerts.json","a")
+
     try:
         my_historical = Historical(my_ntopng,iface_id)
         t_end = datetime.datetime.now() - datetime.timedelta(minutes=0*myenv.WINDOW_SIZE_MINUTES)
-        for i in range(6):
+        for i in range(12):
             t_start = t_end - datetime.timedelta(minutes=(i+1) * myenv.WINDOW_SIZE_MINUTES)
             time_dict = {
                 "start" : t_start.strftime("%d/%m/%Y %H:%M:%S"),
                 "end" : t_end.strftime("%d/%m/%Y %H:%M:%S")
             }
+
+            all_time_dict += [time_dict]
+
             from analyzer.utils.u import set_historical
             set_historical(my_historical,iface_id,t_start,t_end)
             raw_alerts = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
@@ -104,13 +120,16 @@ if not FILE_INPUT:
             raw_alerts += my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
                 '%s'), "*", "alert_id = 26", 2000000, "", "")
 
+            from analyzer.alertdb import *
+            for a in raw_alerts:
+                remove_unwanted_fields(a)
             all_raw_alerts += [raw_alerts]
 
-            # from analyzer.alertdb import *
             # for a in raw_alerts:
-            #     new_alert(a)
+                # new_alert(a)
 
 
+            # f.write(str(str_key(raw_alerts)) + ",")
 
             # sup_level_alerts = get_sup_level_alerts()
             # hostsR = get_host_ratings(sup_level_alerts)
@@ -123,31 +142,36 @@ if not FILE_INPUT:
 
             # print(json.dumps({"time" : time_dict} | str_key(get_hosts_outliers(hostsR)),indent=2))
             t_end = t_start
+        f.write("]")
+        f.close()
 
     except ValueError as e:
         print(e)
         os._exit(-1)
 
-    f = open("alerts.json","w")
-    f.write(str(all_raw_alerts))
+    f = open("time.json","w")
+    f.write(str(all_time_dict))
     f.close()
 
-    from analyzer.alertdb import *
-    for raw_alerts in all_raw_alerts:
-        init()
-        for a in raw_alerts:
-            new_alert(a)
 
-        sup_level_alerts = get_sup_level_alerts()
-        hostsR = get_host_ratings(sup_level_alerts)
-        # print(hostsR)
+# if FILE_INPUT:
+#     f = open("alerts.json","r")
+#     all_raw_alerts = f.read()
+#     all_raw_alerts = json.loads(all_raw_alerts)
 
-        hosts_ratings += [hostsR]
-        new_hostsR_handler(hosts_ts,hostsR)
-
-    f = open("hostsR.json", "w")
-    f.write(str(hosts_ratings))
-    f.close()
+# from analyzer.alertdb import *
+# for raw_alerts in all_raw_alerts:
+#     init()
+#     for a in raw_alerts:
+#         new_alert(a)
+#     sup_level_alerts = get_sup_level_alerts()
+#     hostsR = get_host_ratings(sup_level_alerts)
+#     print(hostsR)
+#     hosts_ratings += [hostsR]
+#     new_hostsR_handler(hosts_ts,hostsR)
+# f = open("hostsR.json", "w")
+# f.write(str(hosts_ratings))
+# f.close()
 
 if FILE_INPUT:
     f = open("hostsR.json", "r")
@@ -156,4 +180,9 @@ if FILE_INPUT:
         new_hostsR_handler(hosts_ts,hostsR)
 
 # print(hosts_ts)
-print(json.dumps("Outliers: " + str(str_key(hostsR_outlier(hosts_ts))),indent=2))
+
+from analyzer.utils.c import FEATURES
+
+print("Outliers: " + json.dumps(str_key(outliers := hostsR_outlier_wma(hosts_ts)),indent=2))
+plot_outliers(get_outliers_features(outliers,hosts_ratings),FEATURES,12)
+# print("Outliers: " + json.dumps(str_key(hostsR_outlier_mad(hosts_ts)),indent=2))

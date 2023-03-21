@@ -75,3 +75,15 @@ MIN_PROBING_RELEVANT_SIZE = 10
 # Entropy threshold on the probed server PORTS the attackers (client) are
 # trying to connect to 
 PROBING_ENTROPY_THRESH = 0.8
+
+FEATURES = [
+"BAT_ONE_TIME" ,
+"DGA_DOMAINS",
+"PROBING_VICTIMS",
+"higher_alert_types",
+"cs_paradigm_odd",
+"simultaneous",
+"periodic",
+"similar_periodicity",
+"bat_samefile"
+]

@@ -7,6 +7,8 @@ from collections import Counter
 import numpy as np
 import statistics
 
+import matplotlib.pyplot as plt
+
 from ipaddress import ip_address,IPv4Address
 
 my_historical = iface_id = time_lower = time_upper = None
@@ -380,35 +382,138 @@ def detect_outliers_wma(values:list, lower_bound:int, window_size=5, sigma=3):
    return list(map(lambda x: x + leading_zeros,outliers))
 
 
-def detect_outliers_mad_modified(data, threshold=3.5):
-    """
-    This function detects outliers in a list of numbers using the modified z-score method with MAD.
-    It excludes the first elements of data that are equal to 0 and does not consider the last element as an outlier.
+def detect_outliers_mad_modified(values, threshold=3.5):
+   """
+   This function detects outliers in a list of numbers using the modified z-score method with MAD.
+   It excludes the first elements of data that are equal to 0 and does not consider the last element as an outlier.
 
-    data: list of numbers
-    threshold: modified z-score threshold for outlier detection
+   data: list of numbers
+   threshold: modified z-score threshold for outlier detection
 
-    returns: list of outlier indices
-    """
-    # Exclude first elements equal to 0
-    first_non_zero_idx = next((i for i, x in enumerate(data) if x != 0), len(data))
-    data = data[first_non_zero_idx:]
+   returns: list of outlier indices
+   """
+   # Exclude first elements equal to 0
+   #  first_non_zero_idx = next((i for i, x in enumerate(data) if x != 0), len(data))
+   #  data = data[first_non_zero_idx:]
 
-    # Calculate median and MAD
-    median = statistics.median(data)
-    deviations = [abs(x - median) for x in data]
-    MAD = statistics.median(deviations)
+   data = list(values)
+ 
+   leading_zeros = 0
+   while len(data) > 0 and data[0] == 0:
+      data.pop(0)
+      leading_zeros += 1
+   
 
-    # Calculate modified z-score
-    if MAD == 0:
-        modified_z_scores = [0] * len(data)
-    else:
-        modified_z_scores = [0.6745 * (x - median) / MAD for x in data]
+   # Calculate median and MAD
+   median = statistics.median(data)
+   deviations = [abs(x - median) for x in data]
+   MAD = statistics.median(deviations)
 
-    # Find outliers
-    outliers = [i + first_non_zero_idx for i, x in enumerate(modified_z_scores) if abs(x) > threshold and i != len(modified_z_scores)-1]
+   # Calculate modified z-score
+   if MAD == 0:
+      modified_z_scores = [0] * len(data)
+   else:
+      modified_z_scores = [0.6745 * (x - median) / MAD for x in data]
 
-    return outliers
+   # Find outliers
+   # outliers = [i + leading_zeros for i, x in enumerate(modified_z_scores) if abs(x) > threshold and i != len(modified_z_scores)-1]
+   # return outliers
+
+   outliers = [i for i, x in enumerate(modified_z_scores) if abs(x) > threshold and i != len(modified_z_scores)-1]
+   return list(map(lambda x: x + leading_zeros,outliers))
+
+
+def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
+   """
+   This function returns for each host which presents outliers in its ratings
+   how such an outlier rating was computed, which is the score associated
+   with each feature
+   """
+
+   """
+   Each outliers item looks like this:
+   "('host', vlan_id)": [
+    "[7, 8]",
+    "[0, 0, 0, 0, 0, 0, 31.86, 0, 0, 30.92, 31.42]"
+   ]
+
+   While hosts_ratings is a list of dictionaries whose items look like:
+   {"('host', vlan_id)": {
+    "total": 190.18823310062726,
+    "BAT_ONE_TIME": 25,
+    "higher_alert_types": 20,
+    "periodic": 125.18823310062726,
+    "bat_samefile": 20}
+   """
+   outliers_time_features = {}
+   for k,v in outliers.items():
+      ratings = None
+      for time_index in v[0]:
+         # Get the hosts ratings list corresponding to the time
+         # window where the host k produced an outlier value in its rating
+         ratings = hosts_ratings[time_index]
+
+         # Add its features-specific rating to the returning dict
+         # TODO convert time_index to time
+         # TODO k is a string if parsed from file
+         key = str(k) if (len(ks := ratings.keys()) and type(ks) is str) else k
+         outliers_time_features[(k,time_index)] = ratings[key] if (key in ratings) else {"total" : .0}
+
+         # We do not care about "total" score
+         outliers_time_features[(k,time_index)].pop("total",None)
+
+   # TODO sort
+   return outliers_time_features
+
+def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
+
+   # Fill outliers_time_features with zero values if a feature hasn't contributed
+   for k,v in outliers_time_features.items():
+      for feature in features:
+         if feature not in outliers_time_features[k]:
+            outliers_time_features[k][feature] = 0.
+
+   # Calcola i punteggi intermedi per ogni record
+   scores = []
+   # for i in range(len(features['longitudine'])):
+   #     record_features = {key: features[key][i] for key in features}
+   #     _, cat_scores = compute_rating(record_features)
+
+   #     scores.append(list(cat_scores.values()))
+
+   for k,v in outliers_time_features.items():
+      # print(k,v)
+      scores.append(list(v.values()))
+
+   # Fix different lengths
+   max_len = len(max(scores,key=len))
+   for l in scores:
+      while len(l) < max_len:
+         l.append(0)
+
+   scores = np.array(scores)  # Converti scores in un array NumPy
+   print(scores)
+
+   # Crea un grafico a barre impilate dei punteggi intermedi
+   fig, ax = plt.subplots()
+   categories = features
+   bars = []
+   for i, cat in enumerate(categories):
+       cat_scores = [score[i] for score in scores]
+       print(cat_scores)
+       print(np.sum(scores[:, :i], axis=1))
+       bars.append(ax.bar(np.array(range(n_time_windows)), cat_scores, bottom=np.sum(scores[:, :i], axis=1)))
+
+   # Aggiungi le etichette degli assi e delle categorie
+   ax.set_xticks(range(n_time_windows))
+   ax.set_xticklabels(outliers_time_features.keys(), rotation=90)
+   ax.set_xlabel('Host')
+   ax.set_ylabel('Ratings')
+   ax.legend(bars, categories)
+   plt.subplots_adjust(bottom=0.45)
+   plt.show()
+
+
 
 # New alert handling UTILITIES 
 def a_convert_dtypes(a):
