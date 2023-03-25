@@ -462,6 +462,8 @@ def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
 
 def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
 
+   print(len(outliers_time_features))
+   print((outliers_time_features))
    # Fill outliers_time_features with zero values if a feature hasn't contributed
    for k,v in outliers_time_features.items():
       for feature in features:
@@ -478,13 +480,16 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
 
    for k,v in outliers_time_features.items():
       # print(k,v)
-      scores.append(list(v.values()))
+      sorted_values = [v[feature] for feature in sorted(v.keys(), key=lambda k: features.index(k))]
+      scores.append(sorted_values)
 
    # Fix different lengths
-   max_len = len(max(scores,key=len))
-   for l in scores:
-      while len(l) < max_len:
-         l.append(0)
+   # max_len = len(max(scores,key=len))
+   # max_len = n_time_windows
+   # for l in scores:
+      # while len(l) < max_len:
+         # l += [.0]
+         # l.append(.0)
 
    scores = np.array(scores)  # Converti scores in un array NumPy
    print(scores)
@@ -494,9 +499,11 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
    categories = features
    bars = []
    for i, cat in enumerate(categories):
+       print(i,cat)
        cat_scores = [score[i] for score in scores]
-      #  print(cat_scores)
-      #  print(np.sum(scores[:, :i], axis=1))
+      #  print(np.array(range(n_time_windows)).shape)
+      #  print(np.array(cat_scores).shape)
+      #  print(np.sum(scores[:, :i], axis=1).shape)
        bars.append(ax.bar(np.array(range(n_time_windows)), cat_scores, bottom=np.sum(scores[:, :i], axis=1)))
 
    # Aggiungi le etichette degli assi e delle categorie
