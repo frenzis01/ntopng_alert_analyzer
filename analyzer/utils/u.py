@@ -6,6 +6,9 @@ from collections import Counter
 
 import numpy as np
 import statistics
+import re
+from ast import literal_eval as make_tuple
+
 
 import matplotlib.pyplot as plt
 
@@ -27,14 +30,6 @@ def get_value_from_keys(d, keys: list):
       return d
    key = keys.pop(0)
    return get_value_from_keys(d[key],keys)
-
-
-def low_level_info(alert):
-   is_server(alert) and alert["alert_name"] in ["tls_certificate_selfsigned",
-                           "ndpi_suspicious_dga_domain",
-                           "ndpi_ssh_obsolete_client",
-                           "ndpi_smb_insecure_version",
-                           "data_exfiltration"]
                            
 # Other utilities
 def get_BAT_path_server(x):
@@ -500,8 +495,8 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
    bars = []
    for i, cat in enumerate(categories):
        cat_scores = [score[i] for score in scores]
-       print(cat_scores)
-       print(np.sum(scores[:, :i], axis=1))
+      #  print(cat_scores)
+      #  print(np.sum(scores[:, :i], axis=1))
        bars.append(ax.bar(np.array(range(n_time_windows)), cat_scores, bottom=np.sum(scores[:, :i], axis=1)))
 
    # Aggiungi le etichette degli assi e delle categorie
@@ -513,6 +508,18 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
    plt.subplots_adjust(bottom=0.45)
    plt.show()
 
+def tuple_hook(obj):
+   if (type(obj) is dict):
+      return {deserialize_key(k):tuple_hook(v) for k,v in obj.items()}
+   if (type(obj) is list):
+      return list(map(deserialize_key,obj))
+   return obj
+
+def deserialize_key(s):
+   if (type(s) is str and
+      re.match("\(('.+?',\s){1,2}([0-9]+)(,\s[0-9]+)?\)",s)):
+      return make_tuple(s)
+   return s
 
 
 # New alert handling UTILITIES 
