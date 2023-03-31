@@ -54,7 +54,11 @@ def dict_init_alertnames():
     snd_grp["ndpi_suspicious_dga_domain"] = {}
     snd_grp["tls_certificate_selfsigned"] = {}
     
-
+def set_bkt_stats(bkt_stats_update:list):
+    global bkt_srv_stats,bkt_cli_stats,bkt_srvcli_stats
+    bkt_srv_stats = bkt_stats_update[0]
+    bkt_cli_stats = bkt_stats_update[1]
+    bkt_srvcli_stats = bkt_stats_update[2]
 
 init()
 
@@ -150,6 +154,7 @@ def harvesting(bound: dt.datetime):
 def get_bkt(BKT: int) -> dict:
     if (BKT not in range(3)):
         raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
+    global bkt_srv_stats,bkt_cli_stats,bkt_srvcli_stats
     if (BKT == GRP_SRV):
         return bkt_srv
     if (BKT == GRP_CLI):
@@ -345,6 +350,7 @@ def get_singleton_alertview() -> dict:
 def get_bkt_stats(BKT: int) -> dict:
     if (BKT not in range(3)):
         raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
+    # global bkt_srv_stats,bkt_cli_stats,bkt_srvcli_stats
     if (BKT == GRP_SRV):
         return bkt_srv_stats
     if (BKT == GRP_CLI):
@@ -399,40 +405,51 @@ def get_host_ratings(sup_alerts: dict):
     
     for grp_crit in sup_alerts["FLAT_GROUPINGS"]:
         HIGHER_ALERT_TYPES_rate = 20
-        HIGHER_ALERT_TYPES_bonus = 20
-        def compute_HAT_rate(key,crit: str):
-            stats = get_bkt_stats(map_name_to_id(crit))
-            percentage = 1 - (stats[key]["tdiff_CV"]/PERIODIC_CV_THRESHOLD)
-            bonus = PERIODIC_bonus * percentage
-            return PERIODIC_rate + bonus
+        def get_rate(key,crit,rate):
+            crit = map_name_to_id(crit)
+            try:
+                size = (stats := get_bkt_stats(crit))[key]["size"]
+                bonus = (rate*0.10) * math.log(size)
+            except Exception as e:
+                print(stats)
+                print(key,crit)
+                print(e)
+            return rate + bonus
+
+
+        def get_hat_rate(key,crit,rate):
+            crit = map_name_to_id(crit)
+            count = sup_alerts["FLAT_GROUPINGS"][grp_crit]["higher_alert_types"][key]
+            bonus = (rate*0.10) * math.log(count)
+            return rate + bonus
 
             
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["higher_alert_types"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),HIGHER_ALERT_TYPES_rate,"higher_alert_types")
-                u.dict_incr(hostsR,(key[1],key[2]),HIGHER_ALERT_TYPES_rate,"higher_alert_types")
+                u.dict_incr(hostsR,(key[0],key[2]),get_hat_rate(key,grp_crit,HIGHER_ALERT_TYPES_rate),"higher_alert_types")
+                u.dict_incr(hostsR,(key[1],key[2]),get_hat_rate(key,grp_crit,HIGHER_ALERT_TYPES_rate),"higher_alert_types")
             else: # SRV or CLI tuple 
-                u.dict_incr(hostsR,(key[0],key[1]),HIGHER_ALERT_TYPES_rate,"higher_alert_types")
+                u.dict_incr(hostsR,(key[0],key[1]),get_hat_rate(key,grp_crit,HIGHER_ALERT_TYPES_rate),"higher_alert_types")
 
         CS_PARADIGM_ODD_rate = 10
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["cs_paradigm_odd"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),CS_PARADIGM_ODD_rate,"cs_paradigm_odd")
-                u.dict_incr(hostsR,(key[1],key[2]),CS_PARADIGM_ODD_rate,"cs_paradigm_odd")
+                u.dict_incr(hostsR,(key[0],key[2]),get_rate(key,grp_crit,CS_PARADIGM_ODD_rate),"cs_paradigm_odd")
+                u.dict_incr(hostsR,(key[1],key[2]),get_rate(key,grp_crit,CS_PARADIGM_ODD_rate),"cs_paradigm_odd")
             else: # SRV or CLI tuple 
-                u.dict_incr(hostsR,(key[0],key[1]),CS_PARADIGM_ODD_rate,"cs_paradigm_odd")
+                u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,CS_PARADIGM_ODD_rate),"cs_paradigm_odd")
 
-        SIMULTANEOUS_rate = 50
+        SIMULTANEOUS_rate = 40
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["simultaneous"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),SIMULTANEOUS_rate,"simultaneous")
-                u.dict_incr(hostsR,(key[1],key[2]),SIMULTANEOUS_rate,"simultaneous")
+                u.dict_incr(hostsR,(key[0],key[2]),get_rate(key,grp_crit,SIMULTANEOUS_rate),"simultaneous")
+                u.dict_incr(hostsR,(key[1],key[2]),get_rate(key,grp_crit,SIMULTANEOUS_rate),"simultaneous")
             else: # SRV or CLI tuple 
-                u.dict_incr(hostsR,(key[0],key[1]),SIMULTANEOUS_rate,"simultaneous")
+                u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,SIMULTANEOUS_rate),"simultaneous")
 
         PERIODIC_rate = 30
         PERIODIC_bonus = 20
-        def compute_periodic_rate (key, crit:str):
+        def compute_periodic_rate (key, crit:str) -> float:
             stats = get_bkt_stats(map_name_to_id(crit))
             percentage = 1 - (stats[key]["tdiff_CV"]/PERIODIC_CV_THRESHOLD)
             bonus = PERIODIC_bonus * percentage
@@ -440,30 +457,30 @@ def get_host_ratings(sup_alerts: dict):
 
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["periodic"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),compute_periodic_rate(key,grp_crit),"periodic")
-                u.dict_incr(hostsR,(key[1],key[2]),compute_periodic_rate(key,grp_crit),"periodic")
+                u.dict_incr(hostsR,(key[0],key[2]),get_rate(key,grp_crit,compute_periodic_rate(key,grp_crit)),"periodic")
+                u.dict_incr(hostsR,(key[1],key[2]),get_rate(key,grp_crit,compute_periodic_rate(key,grp_crit)),"periodic")
             else: # SRV or CLI tuple 
-                u.dict_incr(hostsR,(key[0],key[1]),compute_periodic_rate(key,grp_crit),"periodic")
+                u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,compute_periodic_rate(key,grp_crit)),"periodic")
 
         SIMILAR_PERIODICITY_rate = 10
         for key_list in sup_alerts["FLAT_GROUPINGS"][grp_crit]["similar_periodicity"].values():
             for key in key_list: 
                 if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                    u.dict_incr(hostsR,(key[0],key[2]),SIMILAR_PERIODICITY_rate,"similar_periodicity")
-                    u.dict_incr(hostsR,(key[1],key[2]),SIMILAR_PERIODICITY_rate,"similar_periodicity")
+                    u.dict_incr(hostsR,(key[0],key[2]),get_rate(key,grp_crit,SIMILAR_PERIODICITY_rate),"similar_periodicity")
+                    u.dict_incr(hostsR,(key[1],key[2]),get_rate(key,grp_crit,SIMILAR_PERIODICITY_rate),"similar_periodicity")
                 else: # SRV or CLI tuple 
-                    u.dict_incr(hostsR,(key[0],key[1]),SIMILAR_PERIODICITY_rate,"similar_periodicity")
+                    u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,SIMILAR_PERIODICITY_rate),"similar_periodicity")
 
         BAT_SAMEFILE_srv = 20
         BAT_SAMEFILE_cli = 20
         for key in sup_alerts["FLAT_GROUPINGS"][grp_crit]["bat_samefile"]:
             if (grp_crit == "SRVCLI"): # (srv,cli,vlan) tuple
-                u.dict_incr(hostsR,(key[0],key[2]),BAT_SAMEFILE_srv,"bat_samefile")
-                u.dict_incr(hostsR,(key[1],key[2]),BAT_SAMEFILE_cli,"bat_samefile")
+                u.dict_incr(hostsR,(key[0],key[2]),get_rate(key,grp_crit,BAT_SAMEFILE_srv),"bat_samefile")
+                u.dict_incr(hostsR,(key[1],key[2]),get_rate(key,grp_crit,BAT_SAMEFILE_cli),"bat_samefile")
             elif(grp_crit == "SRV"): # SRV 
-                u.dict_incr(hostsR,(key[0],key[1]),BAT_SAMEFILE_srv,"bat_samefile")
+                u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,BAT_SAMEFILE_srv),"bat_samefile")
             elif(grp_crit == "CLI"): # CLI 
-                u.dict_incr(hostsR,(key[0],key[1]),BAT_SAMEFILE_cli,"bat_samefile")
+                u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,BAT_SAMEFILE_cli),"bat_samefile")
 
     # return dict(map(lambda x: (x[0],round(x[1],2)), sorted(hostsR.items(),key=lambda x: x[1],reverse=True)))
     return dict(sorted(hostsR.items(),key=lambda x: x[1]["total"],reverse=True))
