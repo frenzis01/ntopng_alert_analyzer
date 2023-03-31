@@ -407,13 +407,8 @@ def get_host_ratings(sup_alerts: dict):
         HIGHER_ALERT_TYPES_rate = 20
         def get_rate(key,crit,rate):
             crit = map_name_to_id(crit)
-            try:
-                size = (stats := get_bkt_stats(crit))[key]["size"]
-                bonus = (rate*0.10) * math.log(size)
-            except Exception as e:
-                print(stats)
-                print(key,crit)
-                print(e)
+            size = (stats := get_bkt_stats(crit))[key]["size"]
+            bonus = (rate*0.10) * math.log(size)
             return rate + bonus
 
 
@@ -482,7 +477,6 @@ def get_host_ratings(sup_alerts: dict):
             elif(grp_crit == "CLI"): # CLI 
                 u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,BAT_SAMEFILE_cli),"bat_samefile")
 
-    # return dict(map(lambda x: (x[0],round(x[1],2)), sorted(hostsR.items(),key=lambda x: x[1],reverse=True)))
     return dict(sorted(hostsR.items(),key=lambda x: x[1]["total"],reverse=True))
 
 def get_hosts_outliers(hostsR:dict):
