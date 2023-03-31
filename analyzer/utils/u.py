@@ -8,6 +8,7 @@ import numpy as np
 import statistics
 import re
 from ast import literal_eval as make_tuple
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 
 import matplotlib.pyplot as plt
@@ -247,14 +248,16 @@ def shannon_entropy(data):
 # @param hosts_r is a dict containting the update, { host1: current_rating, ...}
 def new_hostsR_handler(hosts_ts:dict,host_r:dict):
    # how many iterations have we already performed?
-   len_TimeWindow = len(list(hosts_ts.values())[0]) if (len(hosts_ts)) else 0
+   # len_TimeWindow = len(list(hosts_ts.values())[0]) if (len(hosts_ts)) else 0
+   len_TimeWindow = max(len(v) for v in hosts_ts.values()) if (len(hosts_ts)) else 0
+   print(len_TimeWindow)
    for k,v in host_r.items():
       # if host was not previously observed
       if k not in hosts_ts:
          # fill with zeros
          # hosts_ts[k] = [0] * len_TimeWindow
          # fill with the first value known
-         hosts_ts[k] = [0] * (len_TimeWindow-1)
+         hosts_ts[k] = [0] * (len_TimeWindow)
       hosts_ts[k] += [v["total"]]
    
    # if no update in host_r for some keys,
@@ -265,55 +268,61 @@ def new_hostsR_handler(hosts_ts:dict,host_r:dict):
          # add zero
          hosts_ts[k] += [0]
 
-def hostsR_outlier_wma(hosts_ts:dict):
+def hostsR_outlier(hosts_ts:dict, outlier_detector: callable):
    outlier_hosts = {}
    for host,ratings in hosts_ts.items():
       # print("host and rating" + str((host,ratings) ))
       # hoti = host_outlier_time_indices
-      hoti = detect_outliers_wma(ratings,lower_bound=40)
+      hoti = outlier_detector(values=ratings,lower_bound=40)
       if hoti:
          outlier_hosts[host] = [hoti, list(map(lambda x: round(x,2),ratings))]   
    return outlier_hosts
 
-def hostsR_outlier_mad(hosts_ts:dict):
-   outlier_hosts = {}
-   for host,ratings in hosts_ts.items():
-      # print("host and rating" + str((host,ratings) ))
-      # hoti = host_outlier_time_indices
-      hoti = detect_outliers_mad_modified(ratings)
-      if hoti:
-         outlier_hosts[host] = [hoti, list(map(lambda x: round(x,2),ratings))]   
-      
-   return outlier_hosts
 
 
-def detect_outliers_iqr(data, threshold=1.5):
+def detect_outliers_iqr(values,lower_bound:int, threshold=3):
     """
     This function detects outliers in a list of numbers using the interquartile range (IQR).
-   
-    data: list of numbers
+
+    values: list of numbers
     threshold: number of IQRs from the median to use as a threshold for outlier detection
-   
+
     returns: list of outlier indices
     """
-    
+    data = list(values)
+
+    leading_zeros = 0
+    while len(data) > 0 and data[0] == 0:
+       data.pop(0)
+       leading_zeros += 1
+
     # Convert the data to a numpy array
     data = np.array(data)
-    
+
     # Calculate the quartiles
     q1, q3 = np.percentile(data, [25, 75])
-    
+
     # Calculate the IQR
     iqr = q3 - q1
-    
+
     # Calculate the lower and upper bounds
-    lower_bound = q1 - threshold * iqr
-    upper_bound = q3 + threshold * iqr
-    
+    lower_b = q1 - threshold * iqr
+    upper_b = q3 + threshold * iqr
+
     # Find the outliers
-    outliers = np.where((data < lower_bound) | (data > upper_bound))[0]
-    
-    return outliers.tolist()
+    outliers = np.where((data < lower_b) | (data > upper_b))[0]
+
+    # If threshold is None
+    # Exclude values below threshold from data
+    if lower_bound is not None:
+       outliers = [x + leading_zeros for x in outliers if data[x] >= lower_bound]
+ 
+   #  # Check if last element is an actual outlier or not   
+   #  if len(outliers) and (data[-1] < threshold or abs(data[-1] - wma[-1]) <= threshold):
+   #     outliers.pop()
+
+
+    return list(outliers)
 
 def detect_outliers_wma(values:list, lower_bound:int, window_size=5, sigma=3):
    """
@@ -376,8 +385,7 @@ def detect_outliers_wma(values:list, lower_bound:int, window_size=5, sigma=3):
 
    return list(map(lambda x: x + leading_zeros,outliers))
 
-
-def detect_outliers_mad_modified(values, threshold=3.5):
+def detect_outliers_mad(values, lower_bound:int,threshold=3.5):
    """
    This function detects outliers in a list of numbers using the modified z-score method with MAD.
    It excludes the first elements of data that are equal to 0 and does not consider the last element as an outlier.
@@ -414,9 +422,113 @@ def detect_outliers_mad_modified(values, threshold=3.5):
    # outliers = [i + leading_zeros for i, x in enumerate(modified_z_scores) if abs(x) > threshold and i != len(modified_z_scores)-1]
    # return outliers
 
-   outliers = [i for i, x in enumerate(modified_z_scores) if abs(x) > threshold and i != len(modified_z_scores)-1]
+   outliers = [i for i, x in enumerate(modified_z_scores) if (abs(x) > threshold and data[i] >= lower_bound and i != len(modified_z_scores)-1)]
    return list(map(lambda x: x + leading_zeros,outliers))
 
+
+
+def detect_outliers_exp_smooth(values, lower_bound : int, alpha=0.3, threshold=3):
+    """
+    This function detects outliers in a list of numbers using exponential smoothing.
+    
+    values: list of numbers
+    alpha: smoothing factor
+    threshold: number of standard deviations from the smoothed values to use as a threshold for outlier detection
+    
+    returns: list of outlier indices
+    """
+    data = list(values)
+    # Exclude leading zeros
+    leading_zeros = 0
+    while len(data) > 0 and data[0] == 0:
+       data.pop(0)
+       leading_zeros += 1
+    if len(data) == 0:
+        return []
+    
+    data = np.array(data)
+    # Apply exponential smoothing
+    smoothed = [data[0]]
+    for i in range(1, len(data)):
+        smoothed.append(alpha * data[i] + (1 - alpha) * smoothed[-1])
+    
+    # Calculate deviations from smoothed values
+    deviation = np.abs(data - smoothed)
+    
+    # Calculate the standard deviation of the deviation
+    std_dev = np.std(deviation)
+    
+    # Check that the standard deviation is not zero
+    if std_dev == 0:
+        return []
+    
+    # Calculate the threshold for outlier detection
+    threshold = threshold * std_dev
+    
+    # Find the outliers
+    outliers = np.where(deviation > threshold)[0]
+    
+    outliers = list(filter(lambda x: values[x] >= lower_bound,map(lambda x: x + leading_zeros,outliers)))
+    
+    return outliers
+
+
+def detect_outliers_holt_winters(values, lower_bound, threshold=3.5, smoothing_level=0.3, smoothing_trend=0.1, smoothing_seasonal=0.3, seasonal_periods=None):
+    """
+    This function detects outliers in a list of numbers using the triple exponential smoothing (Holt-Winters) method.
+    
+    values: list of numbers
+    threshold: number of standard deviations from the predicted value to use as a threshold for outlier detection
+    smoothing_level: parameter of the Holt-Winters model controlling the smoothing of the level
+    smoothing_trend: parameter of the Holt-Winters model controlling the smoothing of the trend
+    smoothing_seasonal: parameter of the Holt-Winters model controlling the smoothing of the seasonal component
+    seasonal_periods: number of periods in a complete seasonal cycle, used for the seasonal component of the Holt-Winters model
+    
+    returns: list of outlier indices
+    """
+    data = list(values)
+    # Exclude leading zeros
+    leading_zeros = 0
+    while len(data) > 0 and data[0] == 0:
+       data.pop(0)
+       leading_zeros += 1
+      
+   #  # Exclude leading zeros if present
+   #  while len(data) > 0 and data[0] == 0:
+   #      data = data[1:]
+    
+    
+    # If data has less than 2 elements, return an empty list
+    if len(data) < 2:
+        return []
+    
+    data = np.array(data)
+
+    # Create the Holt-Winters model
+    model = ExponentialSmoothing(data, trend='add',seasonal=('add' if seasonal_periods else None), seasonal_periods=seasonal_periods)
+    
+    # Fit the model and predict the values
+    fitted_model = model.fit(smoothing_level=smoothing_level, smoothing_trend=smoothing_trend, smoothing_seasonal=smoothing_seasonal)
+    predicted_values = fitted_model.fittedvalues
+    
+    # Calculate the residuals (differences between the actual and predicted values)
+    residuals = data - predicted_values
+    
+    # Calculate the standard deviation of the residuals
+    std_dev = np.std(residuals)
+    
+    # Calculate the threshold for outlier detection
+    threshold = threshold * std_dev
+    
+    # Find the outliers
+    outliers = np.where(np.abs(residuals) > threshold)[0]
+
+    # Check if last element is an actual outlier or not   
+    if len(outliers) and np.abs(data[-1] - predicted_values[-1]) <= threshold:
+        outliers = outliers[:-1]
+    
+    outliers = list(filter(lambda x: values[x] >= lower_bound,map(lambda x: x + leading_zeros,outliers)))
+    return outliers
 
 def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
    """
@@ -462,8 +574,8 @@ def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
 
 def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
 
-   print(len(outliers_time_features))
-   print((outliers_time_features))
+   outliers_time_features.pop((("vpn.unicomm.it",47),10),None)
+   len_outlier_keys = len(outliers_time_features.items())
    # Fill outliers_time_features with zero values if a feature hasn't contributed
    for k,v in outliers_time_features.items():
       for feature in features:
@@ -472,48 +584,39 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
 
    # Calcola i punteggi intermedi per ogni record
    scores = []
-   # for i in range(len(features['longitudine'])):
-   #     record_features = {key: features[key][i] for key in features}
-   #     _, cat_scores = compute_rating(record_features)
-
-   #     scores.append(list(cat_scores.values()))
 
    for k,v in outliers_time_features.items():
-      # print(k,v)
       sorted_values = [v[feature] for feature in sorted(v.keys(), key=lambda k: features.index(k))]
       scores.append(sorted_values)
 
    # Fix different lengths
-   # max_len = len(max(scores,key=len))
-   # max_len = n_time_windows
-   # for l in scores:
-      # while len(l) < max_len:
+   max_len = len(max(scores,key=len))
+   max_len = n_time_windows
+   for l in scores:
+      while len(l) < max_len:
          # l += [.0]
-         # l.append(.0)
+         l.append(.0)
 
    scores = np.array(scores)  # Converti scores in un array NumPy
-   print(scores)
 
    # Crea un grafico a barre impilate dei punteggi intermedi
    fig, ax = plt.subplots()
    categories = features
    bars = []
    for i, cat in enumerate(categories):
-       print(i,cat)
        cat_scores = [score[i] for score in scores]
-      #  print(np.array(range(n_time_windows)).shape)
+      #  print(np.array(range(len_outlier_keys)).shape)
       #  print(np.array(cat_scores).shape)
       #  print(np.sum(scores[:, :i], axis=1).shape)
-       bars.append(ax.bar(np.array(range(n_time_windows)), cat_scores, bottom=np.sum(scores[:, :i], axis=1)))
+       bars.append(ax.bar(np.array(range(len_outlier_keys)), cat_scores, bottom=np.sum(scores[:, :i], axis=1)))
 
    # Aggiungi le etichette degli assi e delle categorie
-   ax.set_xticks(range(n_time_windows))
+   ax.set_xticks(range(len_outlier_keys))
    ax.set_xticklabels(outliers_time_features.keys(), rotation=90)
    ax.set_xlabel('Host')
    ax.set_ylabel('Ratings')
    ax.legend(bars, categories)
    plt.subplots_adjust(bottom=0.45)
-   plt.show()
 
 def tuple_hook(obj):
    if (type(obj) is dict):
