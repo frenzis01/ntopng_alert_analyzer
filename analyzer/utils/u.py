@@ -268,16 +268,39 @@ def new_hostsR_handler(hosts_ts:dict,host_r:dict):
          # add zero
          hosts_ts[k] += [0]
 
+def contains_two_nonzero_values(v:list):
+   """
+   This function checks whether v contains at least two different values != 0
+   """
+   nonzero_values = set(filter(lambda x: x != 0, v))
+   return len(nonzero_values) >= 2
+
 def hostsR_outlier(hosts_ts:dict, outlier_detector: callable):
    outlier_hosts = {}
    for host,ratings in hosts_ts.items():
       # print("host and rating" + str((host,ratings) ))
       # hoti = host_outlier_time_indices
-      hoti = outlier_detector(values=ratings,lower_bound=40)
+
+      hoti = outlier_detector(values=ratings,lower_bound=45) if contains_two_nonzero_values(ratings) else []
       if hoti:
          outlier_hosts[host] = [hoti, list(map(lambda x: round(x,2),ratings))]   
    return outlier_hosts
 
+def window_rating_outlier(hosts_ratings:list, outlier_detector: callable):
+   outlier_hosts = {}
+   for time_window_index,d in enumerate(hosts_ratings):
+      print(d.values())
+      # filter 0 values
+
+      d = {h:r for h,r in d.items() if r["total"] > 0.}
+      ratings = list(map(lambda x: x["total"],d.values()))
+      hoti = outlier_detector(values=ratings,lower_bound=45) if contains_two_nonzero_values(ratings) else []
+      hosts_index = [(list(d.keys())[i],i) for i in hoti]
+      for host,i in hosts_index:
+         outlier_hosts[host] = [[time_window_index], [round(ratings[i],2)]]
+      
+   return outlier_hosts
+         
 
 
 def detect_outliers_iqr(values,lower_bound:int, threshold=3):
@@ -395,9 +418,6 @@ def detect_outliers_mad(values, lower_bound:int,threshold=3.5):
 
    returns: list of outlier indices
    """
-   # Exclude first elements equal to 0
-   #  first_non_zero_idx = next((i for i, x in enumerate(data) if x != 0), len(data))
-   #  data = data[first_non_zero_idx:]
 
    data = list(values)
  
@@ -424,8 +444,6 @@ def detect_outliers_mad(values, lower_bound:int,threshold=3.5):
 
    outliers = [i for i, x in enumerate(modified_z_scores) if (abs(x) > threshold and data[i] >= lower_bound and i != len(modified_z_scores)-1)]
    return list(map(lambda x: x + leading_zeros,outliers))
-
-
 
 def detect_outliers_exp_smooth(values, lower_bound : int, alpha=0.3, threshold=3):
     """
@@ -472,8 +490,7 @@ def detect_outliers_exp_smooth(values, lower_bound : int, alpha=0.3, threshold=3
     
     return outliers
 
-
-def detect_outliers_holt_winters(values, lower_bound, threshold=3.5, smoothing_level=0.3, smoothing_trend=0.1, smoothing_seasonal=0.3, seasonal_periods=None):
+def detect_outliers_holt_winters(values, lower_bound, threshold=2.0, smoothing_level=0.3, smoothing_trend=0.1, smoothing_seasonal=0.3, seasonal_periods=None):
     """
     This function detects outliers in a list of numbers using the triple exponential smoothing (Holt-Winters) method.
     
@@ -564,13 +581,18 @@ def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
          # TODO convert time_index to time
          # TODO k is a string if parsed from file
          key = str(k) if (len(ks := ratings.keys()) and type(ks) is str) else k
-         outliers_time_features[(k,time_index)] = ratings[key] if (key in ratings) else {"total" : .0}
+         outliers_time_features[(time_index,k)] = ratings[key] if (key in ratings) else {"total" : .0}
 
          # We do not care about "total" score
-         outliers_time_features[(k,time_index)].pop("total",None)
+         # outliers_time_features[(time_index,k)].pop("total",None)
+
+   outliers_time_features = dict(sorted(outliers_time_features.items(),key=lambda x:(x[0][0],-x[1]["total"])))
+   for k in outliers_time_features.keys():
+      outliers_time_features[k].pop("total",None)
 
    # TODO sort
    return outliers_time_features
+
 
 def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
 
