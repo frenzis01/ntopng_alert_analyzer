@@ -20,6 +20,9 @@ STREAMING_MODE = False
 LEARNING_PHASE = False
 CONTEXT_INFO = True
 
+bat_paths = set()
+alerts_per_host = {}
+
 def init():
     global bkt_srv,bkt_cli,bkt_srvcli
     bkt_srv = {}
@@ -35,12 +38,23 @@ def init():
     lowgoodput = {} # Low goodput ratio notice
 
     global bat_paths,bat_server,bkt_srv_stats,bkt_cli_stats,bkt_srvcli_stats,sup_level_alerts
-    bat_paths = set()
+    # TODO path
+    # bat_paths = set()
     bat_server = {}
     bkt_srv_stats = {}
     bkt_cli_stats = {}
     bkt_srvcli_stats = {}
     sup_level_alerts = {}
+
+
+    global clear_text_usernames,dga_suspicious_domains,tls_self_ja3_tuples
+    clear_text_usernames = {}
+    dga_suspicious_domains = {}
+    tls_self_ja3_tuples = {}
+
+    global alerts_per_host
+    for k in alerts_per_host.keys():
+        alerts_per_host[k] += [0]
 
     dict_init_alertnames()
 
@@ -60,13 +74,21 @@ def set_bkt_stats(bkt_stats_update:list):
     bkt_cli_stats = bkt_stats_update[1]
     bkt_srvcli_stats = bkt_stats_update[2]
 
+def set_alerts_per_host(ah:dict,n_time_windows:int):
+    global alerts_per_host
+    alerts_per_host = {k:v[:n_time_windows] for k,v in ah.items()}
+
 init()
 
 def to_be_ignored(a):
-    if (CONTEXT_INFO and (
-        a["vlan_id"] in ctx.EXCLUDED_VLAN or
-        a["alert_id"] in ctx.EXCLUDED_ALERTIDS)):
-            return True
+    try:
+        if (CONTEXT_INFO and (
+            a["vlan_id"] in ctx.EXCLUDED_VLAN or
+            a["alert_id"] in ctx.EXCLUDED_ALERTIDS) or
+            any(s in ctx.EXCLUDED_HOSTS for s in [a["srv_ip"],a["srv_name"],a["cli_ip"],a["cli_name"]])):
+                return True
+    except:
+        return True
     return False
 
 def new_alert(a):
@@ -102,6 +124,8 @@ def new_alert(a):
     bkt_cli = add_to_bucket(a,bkt_cli,(CLI_ID, a["vlan_id"], a["alert_id"]))
     bkt_srvcli = add_to_bucket(a,bkt_srvcli,(SRV_ID,CLI_ID, a["vlan_id"], a["alert_id"]))
 
+    u.n_alerts_incr(alerts_per_host,SRV_ID)
+    u.n_alerts_incr(alerts_per_host,CLI_ID)
     # # add to singleton groups
     # global singleton
     # singleton = add_to_singleton(singleton,a)
@@ -161,10 +185,6 @@ def get_bkt(BKT: int) -> dict:
         return bkt_cli
     if (BKT == GRP_SRVCLI):
         return bkt_srvcli
-
-clear_text_usernames = {}
-dga_suspicious_domains = {}
-tls_self_ja3_tuples = {}
 
 def is_relevant_singleton(a):
     global sav,snd_grp
@@ -477,7 +497,39 @@ def get_host_ratings(sup_alerts: dict):
             elif(grp_crit == "CLI"): # CLI 
                 u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,BAT_SAMEFILE_cli),"bat_samefile")
 
+    
+    SIZE_MAX_RATE = 100
+    def get_size_rate(host):
+        n = alerts_per_host[host][-1]
+        return math.log(n) * (SIZE_MAX_RATE / math.log(max_n_alerts))
+    # size_outliers = get_hosts_size_outliers(u.detect_outliers_iqr_nonzero)
+    # size_outliers = get_hosts_size_outliers(u.detect_outliers_exp_smooth)
+    size_outliers = get_hosts_size_outliers(u.detect_outliers_holt_winters)
+    max_n_alerts = max([0] + [alerts_per_host[k][-1] for k in size_outliers])
+    for k in size_outliers:
+        u.dict_incr(hostsR,k,get_size_rate(k),"N_alerts")
+        # print(hostsR[k])
+
     return dict(sorted(hostsR.items(),key=lambda x: x[1]["total"],reverse=True))
+
+def get_hosts_size_outliers(detect_outliers:callable):
+    outliers = []
+    # check number of observations in each time series
+    n_time_windows = len(next(iter(alerts_per_host.values()))) if (len(alerts_per_host.values()) != 0) else 1
+    # if the time series isn't long enough
+    if (n_time_windows < 5):
+        return []
+    print("TIME_WINDOWS " + str(n_time_windows))
+    for k in filter(lambda x: alerts_per_host[x][-1] != 0,alerts_per_host.keys()):
+        indexes = detect_outliers(alerts_per_host[k],5,threshold=3.5)
+        # since this is called inside get_host_ratings and it
+        # refers only to the last time window
+        # return only if the outlier is the last index  
+        if any(i+1 == n_time_windows for i in indexes):
+            outliers.append(k)
+            print(k + " : " + str(alerts_per_host[k]))
+    
+    return outliers
 
 def get_hosts_outliers(hostsR:dict):
     ratings = list(hostsR.values())
