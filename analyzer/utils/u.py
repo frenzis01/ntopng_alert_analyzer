@@ -10,6 +10,11 @@ import re
 from ast import literal_eval as make_tuple
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
+from warnings import filterwarnings,catch_warnings
+
+
+import copy
+
 
 import matplotlib.pyplot as plt
 
@@ -73,6 +78,17 @@ def add_to_dict_dict_counter(s:dict,k,v):
          s[k][v] = 1
       else:
          s[k][v] += 1
+
+def n_alerts_incr(dct:dict,k):
+   """
+   Increases by 1 dct[k][-1]
+   Puts k in dct if absent
+   """
+   if k not in dct:
+      n = len(next(iter(dct.values()))) if len(dct.values()) else 1
+      dct[k] = [0] * n
+   dct[k][-1] += 1
+   return dct[k][-1]
 
 def str_to_timedelta(s: str) -> dt.timedelta:
     d = dt.datetime.strptime(s, "%H:%M:%S")
@@ -250,7 +266,7 @@ def new_hostsR_handler(hosts_ts:dict,host_r:dict):
    # how many iterations have we already performed?
    # len_TimeWindow = len(list(hosts_ts.values())[0]) if (len(hosts_ts)) else 0
    len_TimeWindow = max(len(v) for v in hosts_ts.values()) if (len(hosts_ts)) else 0
-   print(len_TimeWindow)
+   # print(len_TimeWindow)
    for k,v in host_r.items():
       # if host was not previously observed
       if k not in hosts_ts:
@@ -289,7 +305,7 @@ def hostsR_outlier(hosts_ts:dict, outlier_detector: callable):
 def window_rating_outlier(hosts_ratings:list, outlier_detector: callable):
    outlier_hosts = {}
    for time_window_index,d in enumerate(hosts_ratings):
-      print(d.values())
+      # print(d.values())
       # filter 0 values
 
       d = {h:r for h,r in d.items() if r["total"] > 0.}
@@ -303,7 +319,7 @@ def window_rating_outlier(hosts_ratings:list, outlier_detector: callable):
          
 
 
-def detect_outliers_iqr(values,lower_bound:int, threshold=3):
+def detect_outliers_iqr(values,lower_bound:int, threshold=3.5):
     """
     This function detects outliers in a list of numbers using the interquartile range (IQR).
 
@@ -347,17 +363,60 @@ def detect_outliers_iqr(values,lower_bound:int, threshold=3):
 
     return list(outliers)
 
-def detect_outliers_wma(values:list, lower_bound:int, window_size=5, sigma=3):
+def detect_outliers_iqr_nonzero(values, lower_bound:int, threshold=4):
+    """
+    This function detects outliers in a list of numbers using the interquartile range (IQR).
+
+    values: list of numbers
+    threshold: number of IQRs from the median to use as a threshold for outlier detection
+
+    returns: list of outlier indices
+    """
+    data = list(values)
+
+    # Elimina i valori pari a 0 da data e ricava gli indici corrispondenti in values
+    indices = [i for i, val in enumerate(values) if val != 0]
+    data = [val for val in values if val != 0]
+
+    # Convert the data to a numpy array
+    data = np.array(data)
+
+    # Calculate the quartiles
+    q1, q3 = np.percentile(data, [25, 75])
+
+    # Calculate the IQR
+    iqr = q3 - q1
+
+    # Calculate the lower and upper bounds
+    lower_b = q1 - threshold * iqr
+    upper_b = q3 + threshold * iqr
+
+    # Find the outliers
+    outliers = np.where((data < lower_b) | (data > upper_b))[0]
+
+    # If lower_bound is not None, exclude values below lower_bound from data
+    if lower_bound is not None:
+        outliers = [x for x in outliers if data[x] >= lower_bound]
+
+    # Map the outlier indices back to the indices of the original values list
+    outliers = [indices[i] for i in outliers]
+
+    return outliers
+
+
+def detect_outliers_wma(values:list, lower_bound:int, window_size=5, threshold=3):
    """
    This function detects outliers in a list of numbers using the weighted moving average WMA.
    
    data: list of numbers
    window_size: size of the window used for the moving average
-   sigma: number of standard deviations from the moving average to use as a threshold for outlier detection
+   threshold: aka sigma number of standard deviations from the moving average to use as a threshold for outlier detection
    lower_bound: values below this threshold will be excluded from outlier detection
    
    returns: list of outlier indices
    """
+
+   sigma = threshold # renaming
    data = list(values)
 
    leading_zeros = 0
@@ -445,7 +504,7 @@ def detect_outliers_mad(values, lower_bound:int,threshold=3.5):
    outliers = [i for i, x in enumerate(modified_z_scores) if (abs(x) > threshold and data[i] >= lower_bound and i != len(modified_z_scores)-1)]
    return list(map(lambda x: x + leading_zeros,outliers))
 
-def detect_outliers_exp_smooth(values, lower_bound : int, alpha=0.3, threshold=3):
+def detect_outliers_exp_smooth(values, lower_bound : int, alpha=0.9, threshold=3.5):
     """
     This function detects outliers in a list of numbers using exponential smoothing.
     
@@ -522,11 +581,14 @@ def detect_outliers_holt_winters(values, lower_bound, threshold=2.0, smoothing_l
     data = np.array(data)
 
     # Create the Holt-Winters model
-    model = ExponentialSmoothing(data, trend='add',seasonal=('add' if seasonal_periods else None), seasonal_periods=seasonal_periods)
-    
-    # Fit the model and predict the values
-    fitted_model = model.fit(smoothing_level=smoothing_level, smoothing_trend=smoothing_trend, smoothing_seasonal=smoothing_seasonal)
-    predicted_values = fitted_model.fittedvalues
+    with catch_warnings():
+       filterwarnings("ignore", category=RuntimeWarning)
+       model = ExponentialSmoothing(data, trend='add',seasonal=('add' if seasonal_periods else None), seasonal_periods=seasonal_periods,)
+      #  filterwarnings('ignore', category=w[0].category, module=w[0].module, lineno=w[0].lineno)
+       # Fit the model and predict the values
+       fitted_model = model.fit(smoothing_level=smoothing_level, smoothing_trend=smoothing_trend, smoothing_seasonal=smoothing_seasonal)
+       predicted_values = fitted_model.fittedvalues
+
     
     # Calculate the residuals (differences between the actual and predicted values)
     residuals = data - predicted_values
@@ -586,18 +648,30 @@ def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
          # We do not care about "total" score
          # outliers_time_features[(time_index,k)].pop("total",None)
 
-   outliers_time_features = dict(sorted(outliers_time_features.items(),key=lambda x:(x[0][0],-x[1]["total"])))
+   # deepcopy necessary because we are popping total from the dict
+   # and it might be needed when sorting if an outlier is detected multiple times
+   # by different function calls
+   outliers_time_features = copy.deepcopy(dict(sorted(outliers_time_features.items(),key=lambda x:(x[0][0],x[1]["total"]))))
    for k in outliers_time_features.keys():
       outliers_time_features[k].pop("total",None)
 
-   # TODO sort
    return outliers_time_features
 
+def map_index_to_time(outliers_features:dict,time_lst:list):
+   return {(time_lst[k[0]]["start"],k[1]):v for k,v in outliers_features.items()}
 
-def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
+def plot_outliers(outliers_time_features, features:list, n_time_windows:int, hosts_ratings:dict, all_time_dict:list):
 
-   outliers_time_features.pop((("vpn.unicomm.it",47),10),None)
+   # filter vpn.unicomm.it
+   # for k in outliers_time_features.keys():
+   #    if k[1] == ("vpn.unicomm.it",47):
+   #       outliers_time_features.pop(outliers_time_features)
+   # outliers_time_features = {k:v for k,v in outliers_time_features.items() if (k[1] != ("vpn.unicomm.it",47))}
+   # outliers_time_features.pop((("vpn.unicomm.it",47),10),None)
+
    len_outlier_keys = len(outliers_time_features.items())
+   if len_outlier_keys == 0:
+      return
    # Fill outliers_time_features with zero values if a feature hasn't contributed
    for k,v in outliers_time_features.items():
       for feature in features:
@@ -612,7 +686,7 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
       scores.append(sorted_values)
 
    # Fix different lengths
-   max_len = len(max(scores,key=len))
+   # max_len = len(max(scores,key=len))
    max_len = n_time_windows
    for l in scores:
       while len(l) < max_len:
@@ -639,6 +713,18 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int):
    ax.set_ylabel('Ratings')
    ax.legend(bars, categories)
    plt.subplots_adjust(bottom=0.45)
+
+   def onclick(event):
+      index = int(event.xdata)
+      key = list(outliers_time_features.keys())[index]
+      tmp = {key[1] : [list(range(0,len(hosts_ratings))),[]]}
+      feats = map_index_to_time(get_outliers_features(tmp,hosts_ratings),all_time_dict)
+      # print(json.dumps(str_key(feats),indent=2))
+      plot_outliers(feats,features,n_time_windows,hosts_ratings,all_time_dict)
+      plt.show()
+
+   cid = fig.canvas.mpl_connect('button_press_event', onclick)
+
 
 def tuple_hook(obj):
    if (type(obj) is dict):
