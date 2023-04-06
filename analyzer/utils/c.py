@@ -86,5 +86,5 @@ FEATURES = [
 "periodic",
 "similar_periodicity",
 "bat_samefile",
-"N_alerts"
+"N_alerts",
 ]
