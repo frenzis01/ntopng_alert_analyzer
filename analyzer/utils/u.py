@@ -219,7 +219,6 @@ def find_longest_common_subsequent_substrs(l1:list,l2:list):
       i = index
    return res
 
-
 def add_to_domain_dict(d:dict,name:str,key):
    best_match = [name]
    best_match_name = name
@@ -274,7 +273,7 @@ def new_hostsR_handler(hosts_ts:dict,host_r:dict):
          # hosts_ts[k] = [0] * len_TimeWindow
          # fill with the first value known
          hosts_ts[k] = [0] * (len_TimeWindow)
-      hosts_ts[k] += [v["total"]]
+      hosts_ts[k] += [v["total"]] 
    
    # if no update in host_r for some keys,
    # then add zero
@@ -563,6 +562,8 @@ def detect_outliers_holt_winters(values, lower_bound, threshold=2.0, smoothing_l
     returns: list of outlier indices
     """
     data = list(values)
+    if len(set(values)) == 1:
+       return []
     # Exclude leading zeros
     leading_zeros = 0
     while len(data) > 0 and data[0] == 0:
@@ -720,8 +721,11 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int, hos
       tmp = {key[1] : [list(range(0,len(hosts_ratings))),[]]}
       feats = map_index_to_time(get_outliers_features(tmp,hosts_ratings),all_time_dict)
       # print(json.dumps(str_key(feats),indent=2))
-      plot_outliers(feats,features,n_time_windows,hosts_ratings,all_time_dict)
-      plt.show()
+      try:
+         plot_outliers(feats,features,n_time_windows,hosts_ratings,all_time_dict)
+         plt.show()
+      except TypeError as e:
+         e # Do nothing
 
    cid = fig.canvas.mpl_connect('button_press_event', onclick)
 

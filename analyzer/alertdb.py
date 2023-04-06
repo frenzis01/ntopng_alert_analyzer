@@ -124,8 +124,8 @@ def new_alert(a):
     bkt_cli = add_to_bucket(a,bkt_cli,(CLI_ID, a["vlan_id"], a["alert_id"]))
     bkt_srvcli = add_to_bucket(a,bkt_srvcli,(SRV_ID,CLI_ID, a["vlan_id"], a["alert_id"]))
 
-    u.n_alerts_incr(alerts_per_host,SRV_ID)
-    u.n_alerts_incr(alerts_per_host,CLI_ID)
+    u.n_alerts_incr(alerts_per_host,(SRV_ID,a["vlan_id"]))
+    u.n_alerts_incr(alerts_per_host,(CLI_ID,a["vlan_id"]))
     # # add to singleton groups
     # global singleton
     # singleton = add_to_singleton(singleton,a)
@@ -462,8 +462,8 @@ def get_host_ratings(sup_alerts: dict):
             else: # SRV or CLI tuple 
                 u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,SIMULTANEOUS_rate),"simultaneous")
 
-        PERIODIC_rate = 30
-        PERIODIC_bonus = 20
+        PERIODIC_rate = 20
+        PERIODIC_bonus = 15
         def compute_periodic_rate (key, crit:str) -> float:
             stats = get_bkt_stats(map_name_to_id(crit))
             percentage = 1 - (stats[key]["tdiff_CV"]/PERIODIC_CV_THRESHOLD)
@@ -498,17 +498,30 @@ def get_host_ratings(sup_alerts: dict):
                 u.dict_incr(hostsR,(key[0],key[1]),get_rate(key,grp_crit,BAT_SAMEFILE_cli),"bat_samefile")
 
     
-    SIZE_MAX_RATE = 100
+    SIZE_MAX_RATE = 60
     def get_size_rate(host):
         n = alerts_per_host[host][-1]
-        return math.log(n) * (SIZE_MAX_RATE / math.log(max_n_alerts))
+        return math.log(n,10) * (SIZE_MAX_RATE / math.log(max_n_alerts, 10))
     # size_outliers = get_hosts_size_outliers(u.detect_outliers_iqr_nonzero)
     # size_outliers = get_hosts_size_outliers(u.detect_outliers_exp_smooth)
     size_outliers = get_hosts_size_outliers(u.detect_outliers_holt_winters)
+    # max_n_alerts is the maximum number of alerts per host in the size_outlier hosts
     max_n_alerts = max([0] + [alerts_per_host[k][-1] for k in size_outliers])
     for k in size_outliers:
         u.dict_incr(hostsR,k,get_size_rate(k),"N_alerts")
         # print(hostsR[k])
+
+    SIZE_MAX_BONUS_RATE = 15
+    def get_size_bonus_rate(host):
+        if host in size_outliers:
+            return 0
+        n = alerts_per_host[host][-1]
+        return math.log(n,10) * (SIZE_MAX_BONUS_RATE / math.log(max_n_alerts, 10))
+    # max_n_alerts is the maximum number of alerts per host in the hosts which have computed a rating
+    # in this time windows
+    max_n_alerts = max([0] + [alerts_per_host[k][-1] for k in hostsR.keys()])
+    for k in hostsR.keys():
+        u.dict_incr(hostsR,k,get_size_bonus_rate(k),"N_alerts")
 
     return dict(sorted(hostsR.items(),key=lambda x: x[1]["total"],reverse=True))
 
@@ -520,14 +533,17 @@ def get_hosts_size_outliers(detect_outliers:callable):
     if (n_time_windows < 5):
         return []
     print("TIME_WINDOWS " + str(n_time_windows))
-    for k in filter(lambda x: alerts_per_host[x][-1] != 0,alerts_per_host.keys()):
+    for k in filter(lambda x: 
+                    (v := alerts_per_host[x])[-1] != 0 and
+                    len([i for i in v if i != 0]) > 3,
+                    alerts_per_host.keys()):
         indexes = detect_outliers(alerts_per_host[k],5,threshold=3.5)
         # since this is called inside get_host_ratings and it
         # refers only to the last time window
         # return only if the outlier is the last index  
         if any(i+1 == n_time_windows for i in indexes):
             outliers.append(k)
-            print(k + " : " + str(alerts_per_host[k]))
+            print(str(k) + " : " + str(alerts_per_host[k]))
     
     return outliers
 
