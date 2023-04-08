@@ -19,6 +19,7 @@ import matplotlib.pyplot as plt
 STREAMING_MODE = False
 LEARNING_PHASE = False
 CONTEXT_INFO = True
+ONLY_MATCHING_HOSTS = True
 
 bat_paths = set()
 alerts_per_host = {}
@@ -82,10 +83,12 @@ init()
 
 def to_be_ignored(a):
     try:
-        if (CONTEXT_INFO and (
+        if ((CONTEXT_INFO and (
             a["vlan_id"] in ctx.EXCLUDED_VLAN or
             a["alert_id"] in ctx.EXCLUDED_ALERTIDS) or
-            any(s in ctx.EXCLUDED_HOSTS for s in [a["srv_ip"],a["srv_name"],a["cli_ip"],a["cli_name"]])):
+            any(s in ctx.EXCLUDED_HOSTS for s in [a["srv_ip"],a["srv_name"],a["cli_ip"],a["cli_name"]]))
+            or (ONLY_MATCHING_HOSTS and (not u.subnet_check(a["srv_ip"]) and not u.subnet_check(a["cli_ip"])))
+        ):
                 return True
     except:
         return True
@@ -509,7 +512,7 @@ def get_host_ratings(sup_alerts: dict):
     max_n_alerts = max([0] + [alerts_per_host[k][-1] for k in size_outliers])
     for k in size_outliers:
         u.dict_incr(hostsR,k,get_size_rate(k),"N_alerts")
-        # print(hostsR[k])
+        print(hostsR[k])
 
     SIZE_MAX_BONUS_RATE = 15
     def get_size_bonus_rate(host):
