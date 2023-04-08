@@ -633,7 +633,7 @@ def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
     "bat_samefile": 20}
    """
    outliers_time_features = {}
-   for k,v in outliers.items():
+   for key,v in outliers.items():
       ratings = None
       for time_index in v[0]:
          # Get the hosts ratings list corresponding to the time
@@ -641,10 +641,9 @@ def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
          ratings = hosts_ratings[time_index]
 
          # Add its features-specific rating to the returning dict
-         # TODO convert time_index to time
          # TODO k is a string if parsed from file
-         key = str(k) if (len(ks := ratings.keys()) and type(ks) is str) else k
-         outliers_time_features[(time_index,k)] = ratings[key] if (key in ratings) else {"total" : .0}
+         # key = str(k) if (len(ks := ratings.keys()) and type(ks) is str) else k
+         outliers_time_features[(time_index,key)] = ratings[key] if (key in ratings) else {"total" : .0}
 
          # We do not care about "total" score
          # outliers_time_features[(time_index,k)].pop("total",None)
@@ -661,7 +660,7 @@ def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
 def map_index_to_time(outliers_features:dict,time_lst:list):
    return {(time_lst[k[0]]["start"],k[1]):v for k,v in outliers_features.items()}
 
-def plot_outliers(outliers_time_features, features:list, n_time_windows:int, hosts_ratings:dict, all_time_dict:list):
+def plot_outliers(outliers_time_features, features:list, n_time_windows:int, hosts_ratings:dict, hosts_sizes:dict,all_time_dict:list):
 
    # filter vpn.unicomm.it
    # for k in outliers_time_features.keys():
@@ -721,8 +720,15 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int, hos
       tmp = {key[1] : [list(range(0,len(hosts_ratings))),[]]}
       feats = map_index_to_time(get_outliers_features(tmp,hosts_ratings),all_time_dict)
       # print(json.dumps(str_key(feats),indent=2))
+
+      # key_sizes = list(filter(lambda x: x[0] == key[1], hosts_sizes.items()))
+      feats_sizes = map_index_to_time({(i,key[1]) : {"N_alerts": hosts_sizes[key[1]][i]} for i in list(range(0,len(hosts_ratings)))}
+                                      ,all_time_dict)
+      # print(feats_sizes)
       try:
-         plot_outliers(feats,features,n_time_windows,hosts_ratings,all_time_dict)
+         plot_outliers(feats,features,n_time_windows,hosts_ratings,hosts_sizes,all_time_dict)
+         plt.show()
+         plot_outliers(feats_sizes,["N_alerts"],n_time_windows,hosts_ratings,hosts_sizes,all_time_dict)
          plt.show()
       except TypeError as e:
          e # Do nothing
@@ -743,6 +749,8 @@ def deserialize_key(s):
       return make_tuple(s)
    return s
 
+def subnet_check(s:str):
+   return True if re.match("10\.10\..*",s) else False
 
 # New alert handling UTILITIES 
 def a_convert_dtypes(a):
