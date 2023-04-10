@@ -15,8 +15,9 @@ from warnings import filterwarnings,catch_warnings
 
 import copy
 
-
 import matplotlib.pyplot as plt
+
+import tkinter as tk
 
 from ipaddress import ip_address,IPv4Address
 
@@ -129,13 +130,13 @@ def make_request(r: str, maxhits: int):
         '%s'), "distinct alert_id, vlan_id, cli_name, cli_ip", r, maxhits,"", "")
    return None
 
-
+HOSTNAMES = False
 def get_id(a,k:int):
    if(k not in range(3)):
       raise Exception("Invalid id: 0,1,2 (srv,cli,srvcli) available only")
-   srv_id = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
-   cli_id = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
-      
+   srv_id = a["srv_name"] if (HOSTNAMES and a["srv_name"] != "") else a["srv_ip"]
+   cli_id = a["cli_name"] if (HOSTNAMES and a["cli_name"] != "") else a["cli_ip"]
+   
    if (k == 0):
       return srv_id
    if (k == 1):
@@ -152,14 +153,14 @@ def get_id_vlan(a,k:int) -> tuple:
    # so we must assign srv_id|cli_id only when strictly 
    # necessary, to avoid KeyError  
    if (k == 0):
-      srv_id = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
+      srv_id = a["srv_name"] if (HOSTNAMES and a["srv_name"] != "") else a["srv_ip"]
       return (srv_id,a["vlan_id"])
    if (k == 1):
-      cli_id = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
+      cli_id = a["cli_name"] if (HOSTNAMES and a["cli_name"] != "") else a["cli_ip"]
       return (cli_id,a["vlan_id"])
    if (k == 2):
-      srv_id = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
-      cli_id = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
+      srv_id = a["srv_name"] if (HOSTNAMES and a["srv_name"] != "") else a["srv_ip"]
+      cli_id = a["cli_name"] if (HOSTNAMES and a["cli_name"] != "") else a["cli_ip"]
       return (srv_id,cli_id,a["vlan_id"])
 
 # @returns the longest sequence of subsequent common substrings
@@ -403,7 +404,7 @@ def detect_outliers_iqr_nonzero(values, lower_bound:int, threshold=4):
     return outliers
 
 
-def detect_outliers_wma(values:list, lower_bound:int, window_size=5, threshold=3):
+def detect_outliers_wma(values:list, lower_bound:int, window_size=5, threshold=2.5):
    """
    This function detects outliers in a list of numbers using the weighted moving average WMA.
    
@@ -503,7 +504,7 @@ def detect_outliers_mad(values, lower_bound:int,threshold=3.5):
    outliers = [i for i, x in enumerate(modified_z_scores) if (abs(x) > threshold and data[i] >= lower_bound and i != len(modified_z_scores)-1)]
    return list(map(lambda x: x + leading_zeros,outliers))
 
-def detect_outliers_exp_smooth(values, lower_bound : int, alpha=0.9, threshold=3.5):
+def detect_outliers_exp_smooth(values, lower_bound : int, alpha=0.8, threshold=3.0):
     """
     This function detects outliers in a list of numbers using exponential smoothing.
     
@@ -548,7 +549,7 @@ def detect_outliers_exp_smooth(values, lower_bound : int, alpha=0.9, threshold=3
     
     return outliers
 
-def detect_outliers_holt_winters(values, lower_bound, threshold=2.0, smoothing_level=0.3, smoothing_trend=0.1, smoothing_seasonal=0.3, seasonal_periods=None):
+def detect_outliers_holt_winters(values, lower_bound, threshold=1.5, smoothing_level=0.2, smoothing_trend=0.1, smoothing_seasonal=0.3, seasonal_periods=None):
     """
     This function detects outliers in a list of numbers using the triple exponential smoothing (Holt-Winters) method.
     
@@ -660,7 +661,14 @@ def get_outliers_features(outliers:dict, hosts_ratings:list) ->dict:
 def map_index_to_time(outliers_features:dict,time_lst:list):
    return {(time_lst[k[0]]["start"],k[1]):v for k,v in outliers_features.items()}
 
-def plot_outliers(outliers_time_features, features:list, n_time_windows:int, hosts_ratings:dict, hosts_sizes:dict,all_time_dict:list):
+
+def plot_outliers(outliers_time_features,
+                  features: list,
+                  n_time_windows: int,
+                  hosts_ratings: dict,
+                  hosts_sizes: dict,
+                  all_time_dict: list,
+                  title: str):
 
    # filter vpn.unicomm.it
    # for k in outliers_time_features.keys():
@@ -712,11 +720,17 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int, hos
    ax.set_xlabel('Host')
    ax.set_ylabel('Ratings')
    ax.legend(bars, categories)
+   fig.canvas.manager.set_window_title(title)
    plt.subplots_adjust(bottom=0.45)
 
    def onclick(event):
       index = int(event.xdata)
       key = list(outliers_time_features.keys())[index]
+
+      # copy to clipboard the host@vlan
+      host_vlan = str(key[1][0]) + ("@" + str(key[1][1])) if (key[1][1] != -1) else ""
+      copy_to_clipboard(host_vlan)
+
       tmp = {key[1] : [list(range(0,len(hosts_ratings))),[]]}
       feats = map_index_to_time(get_outliers_features(tmp,hosts_ratings),all_time_dict)
       # print(json.dumps(str_key(feats),indent=2))
@@ -726,9 +740,9 @@ def plot_outliers(outliers_time_features, features:list, n_time_windows:int, hos
                                       ,all_time_dict)
       # print(feats_sizes)
       try:
-         plot_outliers(feats,features,n_time_windows,hosts_ratings,hosts_sizes,all_time_dict)
+         plot_outliers(feats,features,n_time_windows,hosts_ratings,hosts_sizes,all_time_dict,str(key[1]) + " Ratings")
          plt.show()
-         plot_outliers(feats_sizes,["N_alerts"],n_time_windows,hosts_ratings,hosts_sizes,all_time_dict)
+         plot_outliers(feats_sizes,["N_alerts"],n_time_windows,hosts_ratings,hosts_sizes,all_time_dict,str(key[1]) + " Number of Alerts")
          plt.show()
       except TypeError as e:
          e # Do nothing
@@ -749,8 +763,21 @@ def deserialize_key(s):
       return make_tuple(s)
    return s
 
-def subnet_check(s:str):
-   return True if re.match("10\.10\..*",s) else False
+def subnet_check(s:str,subnet_regex:list):
+   if any(re.match(subnet_re,s) for subnet_re in subnet_regex):
+      return True
+   return False
+
+def copy_to_clipboard(text: str):
+    root = tk.Tk()
+    root.withdraw()
+    root.clipboard_clear()
+    root.clipboard_append(text)
+    root.update()
+    root.destroy()
+
+def is_private(host:str):
+   return ip_address(host).is_private
 
 # New alert handling UTILITIES 
 def a_convert_dtypes(a):
