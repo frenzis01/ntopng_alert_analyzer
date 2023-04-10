@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 STREAMING_MODE = False
 LEARNING_PHASE = False
 CONTEXT_INFO = True
-ONLY_MATCHING_HOSTS = True
+ONLY_MATCHING_HOSTS = False
 
 bat_paths = set()
 alerts_per_host = {}
@@ -48,10 +48,11 @@ def init():
     sup_level_alerts = {}
 
 
-    global clear_text_usernames,dga_suspicious_domains,tls_self_ja3_tuples
+    global clear_text_usernames,dga_suspicious_domains,tls_self_ja3_tuples,blk_peers
     clear_text_usernames = {}
     dga_suspicious_domains = {}
     tls_self_ja3_tuples = {}
+    blk_peers = {}
 
     global alerts_per_host
     for k in alerts_per_host.keys():
@@ -87,7 +88,9 @@ def to_be_ignored(a):
             a["vlan_id"] in ctx.EXCLUDED_VLAN or
             a["alert_id"] in ctx.EXCLUDED_ALERTIDS) or
             any(s in ctx.EXCLUDED_HOSTS for s in [a["srv_ip"],a["srv_name"],a["cli_ip"],a["cli_name"]]))
-            or (ONLY_MATCHING_HOSTS and (not u.subnet_check(a["srv_ip"]) and not u.subnet_check(a["cli_ip"])))
+            or (ONLY_MATCHING_HOSTS and 
+                (not u.subnet_check(a["srv_ip"],ctx.SUBNETS_REGEX) and
+                 not u.subnet_check(a["cli_ip"],ctx.SUBNETS_REGEX)))
         ):
                 return True
     except:
@@ -121,8 +124,8 @@ def new_alert(a):
 
     # add to buckets (i.e. groups)
     global bkt_srv,bkt_cli,bkt_srvcli # use global reference
-    SRV_ID = a["srv_name"] if (a["srv_name"] != "") else a["srv_ip"]
-    CLI_ID = a["cli_name"] if (a["cli_name"] != "") else a["cli_ip"]
+    SRV_ID = u.get_id(a,GRP_SRV)
+    CLI_ID = u.get_id(a,GRP_CLI)
     bkt_srv = add_to_bucket(a,bkt_srv,(SRV_ID, a["vlan_id"], a["alert_id"]))
     bkt_cli = add_to_bucket(a,bkt_cli,(CLI_ID, a["vlan_id"], a["alert_id"]))
     bkt_srvcli = add_to_bucket(a,bkt_srvcli,(SRV_ID,CLI_ID, a["vlan_id"], a["alert_id"]))
@@ -341,6 +344,17 @@ def is_relevant_singleton(a):
         u.addremove_to_singleton(sav[alert_name],SRVCLI_ID,1)
         return SRVCLI_ID
 
+    # TODO ok?
+    global blk_peers
+    if (a["alert_id"] == 1):
+        print(alert_name)
+    # if (alert_name == "blacklisted"):
+        if (u.is_private(SRV_ID[0]) and a["srv2cli_bytes"] > 0):
+            blk_peers[SRV_ID] = "SRV" if (SRV_ID not in blk_peers) else "SRVCLI"
+            return SRV_ID
+        if (u.is_private(CLI_ID[0]) and a["cli2srv_bytes"] > 0):
+            blk_peers[CLI_ID] = "CLI" if (CLI_ID not in blk_peers) else "SRVCLI"
+            return CLI_ID
 
 
     # Avoid considering other alert types
@@ -426,6 +440,11 @@ def get_host_ratings(sup_alerts: dict):
         for key in attackers:
             u.dict_incr(hostsR,(key[1],key[2]),PROBING_VICTIMS_cli,"PROBING_VICTIMS")
     
+    BLK_PEER_rate = 40 
+    for peer in sup_alerts["BLK_PEER"].keys():
+        print("  -------PEER: " + str(peer))
+        u.dict_incr(hostsR,peer,BLK_PEER_rate,"BLK_PEER")
+
     for grp_crit in sup_alerts["FLAT_GROUPINGS"]:
         HIGHER_ALERT_TYPES_rate = 20
         def get_rate(key,crit,rate):
@@ -519,7 +538,7 @@ def get_host_ratings(sup_alerts: dict):
         if host in size_outliers:
             return 0
         n = alerts_per_host[host][-1]
-        return math.log(n,10) * (SIZE_MAX_BONUS_RATE / math.log(max_n_alerts, 10))
+        return math.log(n,10) * (SIZE_MAX_BONUS_RATE / (den if (den := math.log(max_n_alerts, 10)) else 1))
     # max_n_alerts is the maximum number of alerts per host in the hosts which have computed a rating
     # in this time windows
     max_n_alerts = max([0] + [alerts_per_host[k][-1] for k in hostsR.keys()])
@@ -574,7 +593,8 @@ def get_sup_level_alerts() -> dict:
                         "BAT_SERVER_NAMES": {},
                         "DGA_DOMAINS": {},
                         "PROBING_VICTIMS": {},
-                        "TLS_SELFSIGNERS_JA3" : {}}
+                        "TLS_SELFSIGNERS_JA3" : {},
+                        "BLK_PEER" : {}}
     for grp_crit in [GRP_SRV, GRP_CLI, GRP_SRVCLI]:
         sup_level_alerts["FLAT_GROUPINGS"][map_id_to_name(grp_crit)] = {
             "higher_alert_types" : get_higher_alert_types(grp_crit),
@@ -591,6 +611,7 @@ def get_sup_level_alerts() -> dict:
     sup_level_alerts["DGA_DOMAINS"] = get_dga_sus_domains()
     sup_level_alerts["PROBING_VICTIMS"] = get_unidir_probed()
     sup_level_alerts["TLS_SELFSIGNERS_JA3"] = snd_grp["tls_certificate_selfsigned"]
+    sup_level_alerts["BLK_PEER"] = blk_peers
     return sup_level_alerts
 
 
@@ -770,6 +791,10 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
         srv_ip_blk = set(filter(lambda x: x[1] == 1, srv_ip_set))
         d["srv_ip_blk"] = (len(srv_ip_blk)/len(srv_ip_set) if len(srv_ip_set) else 0)
         d["cli_ip_blk"] = s[0]["cli_blacklisted"]
+
+    # TODO
+    d["srv_ip_blk"] = 1 if any(x["srv_blacklisted"] for x in s) else 0
+    d["cli_ip_blk"] = 1 if any(x["cli_blacklisted"] for x in s) else 0
 
     # PERIODICITY - AKA Time interval Coefficient of Variation (CV)
     # assert that 's' is sorted on tstamp
@@ -969,7 +994,7 @@ def get_periodic(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
 
     # Note: exclude not periodic relevant alerts
-    excludes = TLS_ALERTS + ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
+    excludes = TLS_ALERTS #+ ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
 
     # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"],v["size"]))
     return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k, v) in bkt_s.items()
@@ -1046,7 +1071,10 @@ def get_similar_periodicity(GRP_CRIT:int):
 # @returns groups associated with BAT alerts transferring always the same file
 def get_bat_samefile(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
-    return {k: v["bat_same_file"] for (k,v) in bkt_s.items() if v["bat_same_file"] != ""}
+    return {k: v["bat_same_file"] for (k,v) in bkt_s.items() if (
+        v["bat_same_file"] != "" and
+        (not CONTEXT_INFO or
+        not any(v["bat_same_file"].find(x) != -1 for x in ctx.BAT_PATH_WHITELIST)))}
 
 # @returns groups associated with BAT alerts with high percentage of missing User-Agent
 def get_missingUA(GRP_CRIT:int):
@@ -1075,16 +1103,29 @@ def get_blk_peer(GRP_CRIT:int):
     bkt_s = get_bkt_stats(GRP_CRIT)
     
     # Blacklisted hosts percentage threshold
-    BLK_PERC_TH = 0.25
+    BLK_PERC_TH = 0.0
 
     
-    excludes = ["blacklisted"]
+    # excludes = ["blacklisted"]
+    excludes = []
     if (GRP_CRIT == GRP_SRV):
-        peers = {k: "blk_cli_peer" for (k, v) in bkt_s.items()
-                 if (v["cli_ip_blk"] > BLK_PERC_TH and v["alert_name"] not in excludes)}
+        peers = {k: "blk_srv_peer" for (k, v) in bkt_s.items()
+                 if (v["cli_ip_blk"] > BLK_PERC_TH and
+                  v["alert_name"] not in excludes
+                  and (
+                    not CONTEXT_INFO or (u.is_private(k[0]) 
+                    # and is_server(k[-1])
+                    )
+                  ))}
     if (GRP_CRIT == GRP_CLI):
         peers = {k: "blk_cli_peer" for (k, v) in bkt_s.items()
-                 if (v["cli_ip_blk"] > BLK_PERC_TH and v["alert_name"] not in excludes)}
+                 if (v["srv_ip_blk"] > BLK_PERC_TH and
+                  v["alert_name"] not in excludes
+                  and (
+                    not CONTEXT_INFO or (u.is_private(k[0]) 
+                    # and is_client(k[-1])
+                    )
+                  ))}
 
     # print(json.dumps({str(k):v for k,v in peers.items()},indent=2))
     

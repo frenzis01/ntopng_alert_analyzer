@@ -21,7 +21,7 @@ RELEVANT_SINGLETON_ALERTS = [
 
 IGNORE_SINGLETON_ALERTS = [
     # These are not interesting alerts by theirselves
-    "blacklisted",
+    # "blacklisted",
     "ndpi_dns_suspicious_traffic",
     "ndpi_http_suspicious_user_agent",
 
@@ -86,5 +86,6 @@ FEATURES = [
 "periodic",
 "similar_periodicity",
 "bat_samefile",
+"BLK_PEER",
 "N_alerts",
 ]
