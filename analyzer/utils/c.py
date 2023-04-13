@@ -47,7 +47,7 @@ IS_VICTIM_TH = 0.75
 MIN_PERIODIC_SIZE = 3
 # Upper bound on the coefficient of variation (aka relative stddev) on tdiff
 # to consider an alert flow periodic 
-PERIODIC_CV_THRESHOLD = 0.85
+PERIODIC_CV_THRESHOLD = 0.80
 # Entropy threshold on port and IPs to consider a host behavior odd
 # with respect to the client-server paradigm
 CLI_ODD_PORT_S_TH   = 0.1
@@ -87,5 +87,8 @@ FEATURES = [
 "similar_periodicity",
 "bat_samefile",
 "BLK_PEER",
+"TLS_SELFSIGNERS_PEERS",
+"REMOTE_ACCESS_SRV",
+"REMOTE_ACCESS_CLI",
 "N_alerts",
 ]

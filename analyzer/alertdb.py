@@ -23,6 +23,7 @@ ONLY_MATCHING_HOSTS = False
 
 bat_paths = set()
 alerts_per_host = {}
+remote_access = {}
 
 def init():
     global bkt_srv,bkt_cli,bkt_srvcli
@@ -80,6 +81,15 @@ def set_alerts_per_host(ah:dict,n_time_windows:int):
     global alerts_per_host
     alerts_per_host = {k:v[:n_time_windows] for k,v in ah.items()}
 
+def set_blk_peers(bp:dict):
+    global blk_peers
+    blk_peers = bp
+
+def set_remote_access(ra:dict):
+    global remote_access
+    remote_access = ra
+
+
 init()
 
 def to_be_ignored(a):
@@ -91,6 +101,8 @@ def to_be_ignored(a):
             or (ONLY_MATCHING_HOSTS and 
                 (not u.subnet_check(a["srv_ip"],ctx.SUBNETS_REGEX) and
                  not u.subnet_check(a["cli_ip"],ctx.SUBNETS_REGEX)))
+            # or a["vlan_id"] != 46 # TODO remove
+            # or a["vlan_id"] != 58 # TODO remove
         ):
                 return True
     except:
@@ -280,10 +292,12 @@ def is_relevant_singleton(a):
         return None
     # Consider only non-private servers
     if (alert_name == "tls_certificate_selfsigned"
+        and not (CONTEXT_INFO and a["srv_ip"] in ctx.SELFSIGNERS_WHITELIST)
         and (ja3_hash := get_ja3_hash()) 
-        and not (ip_address(a["srv_ip"]).is_private)):
-        key = SRV_ID
-        u.add_to_dict_dict_counter(snd_grp[alert_name],ja3_hash,key)
+        and not u.is_private(a["srv_ip"])):
+        key = CLI_ID
+        snd_grp[alert_name][key] = snd_grp[alert_name][key] + 1 if (key in snd_grp[alert_name]) else 1
+        # u.add_to_dict_dict_counter(snd_grp[alert_name],ja3_hash,key)
         # add ja3 to key tuple
         return key + (ja3_hash,)
     
@@ -303,7 +317,9 @@ def is_relevant_singleton(a):
     if (alert_name == "remote_to_local_insecure_proto" 
         and a_json["ndpi_category_name"] == "RemoteAccess"
         and a["score"] >= 180):
-        u.addremove_to_singleton(sav[alert_name],key,1)
+        # u.addremove_to_singleton(sav[alert_name],key,1)
+        u.addremove_to_singleton(remote_access,(SRV_ID,"srv"),1)
+        u.addremove_to_singleton(remote_access,(CLI_ID,"cli"),1)
         return key
     
     # When sending clear-text credentials
@@ -344,16 +360,17 @@ def is_relevant_singleton(a):
         u.addremove_to_singleton(sav[alert_name],SRVCLI_ID,1)
         return SRVCLI_ID
 
+
     # TODO ok?
     global blk_peers
     if (a["alert_id"] == 1):
-        print(alert_name)
+        # print(alert_name)
     # if (alert_name == "blacklisted"):
         if (u.is_private(SRV_ID[0]) and a["srv2cli_bytes"] > 0):
-            blk_peers[SRV_ID] = "SRV" if (SRV_ID not in blk_peers) else "SRVCLI"
+            u.add_to_blk_peers(blk_peers,SRV_ID,"SRV",CLI_ID)
             return SRV_ID
         if (u.is_private(CLI_ID[0]) and a["cli2srv_bytes"] > 0):
-            blk_peers[CLI_ID] = "CLI" if (CLI_ID not in blk_peers) else "SRVCLI"
+            u.add_to_blk_peers(blk_peers,CLI_ID,"CLI",SRV_ID)
             return CLI_ID
 
 
@@ -440,10 +457,28 @@ def get_host_ratings(sup_alerts: dict):
         for key in attackers:
             u.dict_incr(hostsR,(key[1],key[2]),PROBING_VICTIMS_cli,"PROBING_VICTIMS")
     
+
     BLK_PEER_rate = 40 
-    for peer in sup_alerts["BLK_PEER"].keys():
-        print("  -------PEER: " + str(peer))
-        u.dict_incr(hostsR,peer,BLK_PEER_rate,"BLK_PEER")
+    def get_blk_peer_rate(key):
+        size = len(blk_peers[key])
+        return math.log(1 + size,2)*BLK_PEER_rate
+
+    for (peer,role) in sup_alerts["BLK_PEER"].keys():
+        u.dict_incr(hostsR,peer,get_blk_peer_rate((peer,role)),"BLK_PEER")
+    
+    TLS_SELFSIGNERS_PEERS_rate = 30 
+    for peer in sup_alerts["TLS_SELFSIGNERS_PEERS"].keys():
+        u.dict_incr(hostsR,peer,TLS_SELFSIGNERS_PEERS_rate,"TLS_SELFSIGNERS_PEERS")
+    
+    REMOTE_PEER_srv = 40 
+    REMOTE_PEER_cli = 20 
+    for (peer,role),value in sup_alerts["REMOTE_ACCESS"].items(): 
+        if value != -1:
+            feature = "REMOTE_ACCESS_SRV" if (role == "srv") else "REMOTE_ACCESS_CLI"
+            rate = REMOTE_PEER_srv if (role == "srv") else REMOTE_PEER_cli
+            remote_access[peer,role] = -1
+            u.dict_incr(hostsR,peer,rate,feature)
+    
 
     for grp_crit in sup_alerts["FLAT_GROUPINGS"]:
         HIGHER_ALERT_TYPES_rate = 20
@@ -537,7 +572,8 @@ def get_host_ratings(sup_alerts: dict):
     def get_size_bonus_rate(host):
         if host in size_outliers:
             return 0
-        n = alerts_per_host[host][-1]
+        if (n := alerts_per_host[host][-1]) == 0:
+            return 0
         return math.log(n,10) * (SIZE_MAX_BONUS_RATE / (den if (den := math.log(max_n_alerts, 10)) else 1))
     # max_n_alerts is the maximum number of alerts per host in the hosts which have computed a rating
     # in this time windows
@@ -578,22 +614,18 @@ def get_hosts_outliers(hostsR:dict):
 
     outliers = u.str_key({k:round(v,2) for k,v in hostsR.items() if v >= ub})
     hosts = list(outliers.keys())
-    # plt.figure(figsize=(15,5))
-    # plt.bar(range(len(hosts)),outliers.values(),0.7, color = 'g')
-    # plt.xticks(range(len(hosts)), hosts, rotation=90)
-    # plt.subplots_adjust(bottom=0.45)
-    # plt.show()
     return outliers
 
-def get_sup_level_alerts() -> dict:
+def get_sup_level_alerts(time:dict) -> dict:
     update_bkts_stats()
     global sup_level_alerts
-    sup_level_alerts = {"FLAT_GROUPINGS": {},
+    sup_level_alerts = {"TIME": time,
+                        "FLAT_GROUPINGS": {},
                         "BAT_ONE_TIME" : {},
                         "BAT_SERVER_NAMES": {},
                         "DGA_DOMAINS": {},
                         "PROBING_VICTIMS": {},
-                        "TLS_SELFSIGNERS_JA3" : {},
+                        "TLS_SELFSIGNERS_PEERS" : {},
                         "BLK_PEER" : {}}
     for grp_crit in [GRP_SRV, GRP_CLI, GRP_SRVCLI]:
         sup_level_alerts["FLAT_GROUPINGS"][map_id_to_name(grp_crit)] = {
@@ -610,8 +642,9 @@ def get_sup_level_alerts() -> dict:
     sup_level_alerts["BAT_SERVER_NAMES"] = bat_server
     sup_level_alerts["DGA_DOMAINS"] = get_dga_sus_domains()
     sup_level_alerts["PROBING_VICTIMS"] = get_unidir_probed()
-    sup_level_alerts["TLS_SELFSIGNERS_JA3"] = snd_grp["tls_certificate_selfsigned"]
+    sup_level_alerts["TLS_SELFSIGNERS_PEERS"] = snd_grp["tls_certificate_selfsigned"]
     sup_level_alerts["BLK_PEER"] = blk_peers
+    sup_level_alerts["REMOTE_ACCESS"] = dict(filter(lambda x: x[1] != -1, remote_access.items()))
     return sup_level_alerts
 
 
