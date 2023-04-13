@@ -16,10 +16,13 @@ from warnings import filterwarnings,catch_warnings
 import copy
 
 import matplotlib.pyplot as plt
+from matplotlib.container import BarContainer
 
 import tkinter as tk
 
 from ipaddress import ip_address,IPv4Address
+
+import mplcursors
 
 my_historical = iface_id = time_lower = time_upper = None
 
@@ -67,9 +70,11 @@ def str_val(d:list):
 
 def addremove_to_singleton(a: dict, v, value):
    if (v in a.keys()):
-      a.pop(v,None)
+      # a.pop(v,None)
+      a[v] = -1
    else:
       a[v] = value
+   return a[v]
 
 def add_to_dict_dict_counter(s:dict,k,v):
    if (k not in s):
@@ -79,6 +84,11 @@ def add_to_dict_dict_counter(s:dict,k,v):
          s[k][v] = 1
       else:
          s[k][v] += 1
+
+def add_to_blk_peers(blk_peers:dict,peer,role,peer2):
+    if (key := (peer,role)) not in blk_peers:
+        blk_peers[key] = set()
+    blk_peers[key].add(peer2)
 
 def n_alerts_incr(dct:dict,k):
    """
@@ -709,10 +719,19 @@ def plot_outliers(outliers_time_features,
    bars = []
    for i, cat in enumerate(categories):
        cat_scores = [score[i] for score in scores]
-      #  print(np.array(range(len_outlier_keys)).shape)
-      #  print(np.array(cat_scores).shape)
-      #  print(np.sum(scores[:, :i], axis=1).shape)
-       bars.append(ax.bar(np.array(range(len_outlier_keys)), cat_scores, bottom=np.sum(scores[:, :i], axis=1)))
+       new_bar = ax.bar(np.array(range(len_outlier_keys)), cat_scores, bottom=np.sum(scores[:, :i], axis=1),label=cat)
+       bars.append(new_bar)
+
+   def show_annotation(sel):
+    if type(sel.artist) == BarContainer:
+        bar = sel.artist[sel.index]
+        sel.annotation.set_text(f'{sel.artist.get_label()}: {bar.get_height():.1f}')
+        sel.annotation.xy = (bar.get_x() + bar.get_width() / 2, bar.get_y() + bar.get_height() / 2)
+        sel.annotation.get_bbox_patch().set_alpha(0.8)
+
+   cursor = mplcursors.cursor(hover=2)
+
+   cursor.connect("add", show_annotation)
 
    # Aggiungi le etichette degli assi e delle categorie
    ax.set_xticks(range(len_outlier_keys))
@@ -733,12 +752,9 @@ def plot_outliers(outliers_time_features,
 
       tmp = {key[1] : [list(range(0,len(hosts_ratings))),[]]}
       feats = map_index_to_time(get_outliers_features(tmp,hosts_ratings),all_time_dict)
-      # print(json.dumps(str_key(feats),indent=2))
 
-      # key_sizes = list(filter(lambda x: x[0] == key[1], hosts_sizes.items()))
       feats_sizes = map_index_to_time({(i,key[1]) : {"N_alerts": hosts_sizes[key[1]][i]} for i in list(range(0,len(hosts_ratings)))}
                                       ,all_time_dict)
-      # print(feats_sizes)
       try:
          plot_outliers(feats,features,n_time_windows,hosts_ratings,hosts_sizes,all_time_dict,str(key[1]) + " Ratings")
          plt.show()
