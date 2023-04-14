@@ -12,19 +12,20 @@ from ntopng.historical import Historical
 import datetime
 import json
 import myenv_ as myenv
+import pickle
 
-
-# from analyzer.utils.u import new_hostsR_handler
-# from analyzer.utils.u import hostsR_outlier_wma
-# from analyzer.utils.u import hostsR_outlier_mad
-# from analyzer.utils.u import plot_outliers
-# from analyzer.utils.u import get_outliers_features
-
-# from analyzer.utils.u import str_key
-# from analyzer.utils.u import remove_unwanted_fields
 from analyzer.utils.u import *
+from analyzer.utils.c import FEATURES
+from analyzer.alertdb import *
+from analyzer.utils.u import set_historical
 
+FILE_INPUT = False
 FILE_INPUT = True
+
+ALERTS_INPUT = False
+ALERTS_INPUT = True
+
+ITERATIONS = 24
 
 # Defaults
 username = myenv.myusr
@@ -42,7 +43,6 @@ def usage():
     print("Example: ./test.py -t ce0e284c774fac5a3e981152d325cfae -i 4")
     print("         ./test.py -u ntop -p mypassword -i 4")
     sys.exit(0)
-
 
 try:
     opts, args = getopt.getopt(sys.argv[1:],
@@ -93,96 +93,167 @@ hosts_ts = {}
 hosts_ratings = []
 all_raw_alerts = []
 all_time_dict = []
-if not FILE_INPUT:
-    f = open("alerts.json","w")
-    f.write("[")
-    f.close()
 
-    f = open("alerts.json","a")
+
+t_zero_end = datetime.datetime.now() - datetime.timedelta(minutes=0*myenv.WINDOW_SIZE_MINUTES)
+t_zero_start = t_zero_end - datetime.timedelta(minutes=ITERATIONS*myenv.WINDOW_SIZE_MINUTES)
+
+if not FILE_INPUT and not ALERTS_INPUT:
 
     try:
         my_historical = Historical(my_ntopng,iface_id)
-        t_end = datetime.datetime.now() - datetime.timedelta(minutes=0*myenv.WINDOW_SIZE_MINUTES)
-        for i in range(12):
-            t_start = t_end - datetime.timedelta(minutes=(i+1) * myenv.WINDOW_SIZE_MINUTES)
+        set_historical(my_historical,iface_id,t_zero_start,t_zero_end)
+        t_start = t_zero_start
+        for i in range(ITERATIONS):
+            t_end = t_start + datetime.timedelta(minutes=myenv.WINDOW_SIZE_MINUTES)
             time_dict = {
-                "start" : t_start.strftime("%d/%m/%Y %H:%M:%S"),
-                "end" : t_end.strftime("%d/%m/%Y %H:%M:%S")
+                "start" : t_start.strftime("%Y/%d/%m %H:%M:%S"),
+                "end" : t_end.strftime("%Y/%d/%m %H:%M:%S")
             }
+            print(json.dumps(time_dict,indent=2))
 
             all_time_dict += [time_dict]
-
-            from analyzer.utils.u import set_historical
-            set_historical(my_historical,iface_id,t_start,t_end)
             raw_alerts = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
-                '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "tstamp")
+                '%s'), "*", "severity >= 5", 200000, "", "tstamp")
 
             raw_alerts += my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
                 '%s'), "*", "alert_id = 26", 2000000, "", "")
 
-            from analyzer.alertdb import *
             for a in raw_alerts:
                 remove_unwanted_fields(a)
             all_raw_alerts += [raw_alerts]
 
-            # for a in raw_alerts:
-                # new_alert(a)
-
-
-            # f.write(str(str_key(raw_alerts)) + ",")
-
-            # sup_level_alerts = get_sup_level_alerts()
-            # hostsR = get_host_ratings(sup_level_alerts)
-
-            # hosts_ratings += [hostsR]
-
-            # new_hostsR_handler(hosts_ts,hostsR)
-            # print("HOSTS_TS: " + str(str_key(hosts_ts)))
-
-
-            # print(json.dumps({"time" : time_dict} | str_key(get_hosts_outliers(hostsR)),indent=2))
-            t_end = t_start
-        f.write("]")
-        f.close()
+            t_start = t_end
 
     except ValueError as e:
         print(e)
         os._exit(-1)
 
-    f = open("time.json","w")
-    f.write(str(all_time_dict))
+    f = open("mock_time","wb")
+    pickle.dump(all_time_dict,f)
     f.close()
 
+all_sup_level_alerts = []
 
-# if FILE_INPUT:
-#     f = open("alerts.json","r")
-#     all_raw_alerts = f.read()
-#     all_raw_alerts = json.loads(all_raw_alerts)
+all_bkt_stats = []
 
-# from analyzer.alertdb import *
-# for raw_alerts in all_raw_alerts:
-#     init()
-#     for a in raw_alerts:
-#         new_alert(a)
-#     sup_level_alerts = get_sup_level_alerts()
-#     hostsR = get_host_ratings(sup_level_alerts)
-#     print(hostsR)
-#     hosts_ratings += [hostsR]
-#     new_hostsR_handler(hosts_ts,hostsR)
-# f = open("hostsR.json", "w")
-# f.write(str(hosts_ratings))
-# f.close()
+if not FILE_INPUT:
+
+    if not ALERTS_INPUT:
+        with open("all_alerts","wb") as f:
+            pickle.dump(all_raw_alerts,f)
+
+
+    if ALERTS_INPUT:
+        with open("all_alerts","rb") as f:
+            all_raw_alerts = pickle.load(f)
+        print("-----------Using Alerts from File-----------")
+        my_historical = Historical(my_ntopng,iface_id)
+        with open("mock_time","rb") as f:
+            all_time_dict = pickle.load(f)
+
+    def to_dt(s:str):
+        return datetime.datetime.strptime(s,"%Y/%d/%m %H:%M:%S")
+    t_zero_end = to_dt(all_time_dict[ITERATIONS-1]["end"])
+    t_zero_start = to_dt(all_time_dict[0]["start"])
+    set_historical(my_historical,iface_id,t_zero_start,t_zero_end)
+
+    for i,raw_alerts in enumerate(all_raw_alerts):
+        t_start = to_dt(all_time_dict[i]["start"])
+        print(json.dumps(all_time_dict[i]["start"],indent=1))
+        
+
+        init()
+        for a in raw_alerts:
+            new_alert(a)
+
+        update_bkts_stats()
+        tmp_bkt_stats = (get_bkt_stats(GRP_SRV),get_bkt_stats(GRP_CLI),get_bkt_stats(GRP_SRVCLI))
+        all_bkt_stats += [tmp_bkt_stats]
+
+        sup_level_alerts = get_sup_level_alerts(all_time_dict[i])
+        sla = copy.deepcopy(sup_level_alerts)
+        hostsR = get_host_ratings(sup_level_alerts)
+        
+        if ONLY_MATCHING_HOSTS:
+            hostsR = {k:v for k,v in hostsR.items() if subnet_check(k[0])}
+
+        all_sup_level_alerts += [sla]
+        
+        hosts_ratings += [hostsR]
+        new_hostsR_handler(hosts_ts,hostsR)
+    
+
+    with open("mock_alerts_per_host","wb") as f:
+        pickle.dump(alerts_per_host,f)
+    
+    with open("mock_stats","wb") as f:
+        pickle.dump(all_bkt_stats,f)
+
+    f = open("mock_hostsR", "wb")
+    pickle.dump(hosts_ratings,f)
+    f.close()
+
+    f = open("mock_sup_level_alerts", "wb")
+    pickle.dump(all_sup_level_alerts,f)
+    f.close()
+
+    with open("mock_tmp.json","w") as f:
+        f.write(json.dumps(list(map(str_key,all_sup_level_alerts)),indent=2))
+
 
 if FILE_INPUT:
-    f = open("hostsR.json", "r")
-    hosts_ratings = json.loads(f.read())
-    for hostsR in hosts_ratings:
+
+    with open("mock_alerts_per_host","rb") as f:
+        alerts_per_host = (pickle.load(f))
+
+    with open("mock_time","rb") as f:
+        all_time_dict = pickle.load(f)
+
+    f = open("mock_sup_level_alerts", "rb")
+    all_sup_level_alerts = pickle.load(f)
+    f.close()
+
+    f = open("mock_stats","rb")
+    all_bkt_stats = pickle.load(f)
+    f.close()
+    for i,sup_level_alerts in enumerate(all_sup_level_alerts):
+        set_bkt_stats(all_bkt_stats[i])
+        # TODO
+        set_alerts_per_host(alerts_per_host,i+1)
+        set_blk_peers(sup_level_alerts["BLK_PEER"])
+        set_remote_access(sup_level_alerts["REMOTE_ACCESS"])
+
+        hostsR = {k:v for k,v in get_host_ratings(sup_level_alerts).items() if (k != ("vpn.unicomm.it",47))}
+        hosts_ratings += [hostsR]
         new_hostsR_handler(hosts_ts,hostsR)
 
-# print(hosts_ts)
+    with open("mock_tmp.json","w") as f:
+        f.write(json.dumps(list(map(str_key,all_sup_level_alerts)),indent=2))
+    
 
-from analyzer.utils.c import FEATURES
+hosts_sizes = alerts_per_host
 
-print("Outliers: " + json.dumps(str_key(outliers := hostsR_outlier_wma(hosts_ts)),indent=2))
-plot_outliers(get_outliers_features(outliers,hosts_ratings),FEATURES,12)
-# print("Outliers: " + json.dumps(str_key(hostsR_outlier_mad(hosts_ts)),indent=2))
+
+if ONLY_MATCHING_HOSTS:
+    hosts_ts = {k:v for k,v in hosts_ts.items() if subnet_check(k[0])}
+
+with open("mock_hosts_ts.json", "w") as f:
+    f.write(json.dumps(str_key(hosts_ts),indent=2))
+
+print("Outliers: " + json.dumps(str_key(outliers := hostsR_outlier(hosts_ts,detect_outliers_wma)),indent=2))
+plot_outliers(map_index_to_time(get_outliers_features(outliers,hosts_ratings),all_time_dict),FEATURES,ITERATIONS,hosts_ratings,hosts_sizes, all_time_dict, "H - Weighted Moving Average")
+
+print("Outliers: " + json.dumps(str_key(outliers := hostsR_outlier(hosts_ts,detect_outliers_exp_smooth)),indent=2))
+plot_outliers(map_index_to_time(get_outliers_features(outliers,hosts_ratings),all_time_dict),FEATURES,ITERATIONS,hosts_ratings,hosts_sizes, all_time_dict, "H - Single Exp Smoothing")
+
+print("Outliers: " + json.dumps(str_key(outliers := hostsR_outlier(hosts_ts,detect_outliers_holt_winters)),indent=2))
+plot_outliers(map_index_to_time(get_outliers_features(outliers,hosts_ratings),all_time_dict),FEATURES,ITERATIONS,hosts_ratings,hosts_sizes, all_time_dict, "H - Holt Winters")
+
+
+# TODO Doesn't change anything from 'nonzero' or not, because hosts_ratings items are sorted on the score,
+# so 0 ratings are at the begininning 
+print("Outliers: " + json.dumps(str_key(outliers := window_rating_outlier(hosts_ratings,detect_outliers_iqr_nonzero)),indent=2))
+plot_outliers(map_index_to_time(get_outliers_features(outliers,hosts_ratings),all_time_dict),FEATURES,ITERATIONS,hosts_ratings,hosts_sizes, all_time_dict, "Time Windows - IQR")
+
+plt.show()
