@@ -17,6 +17,7 @@ import copy
 
 import matplotlib.pyplot as plt
 from matplotlib.container import BarContainer
+from matplotlib import cm
 
 import tkinter as tk
 
@@ -716,10 +717,11 @@ def plot_outliers(outliers_time_features,
    # Crea un grafico a barre impilate dei punteggi intermedi
    fig, ax = plt.subplots()
    categories = features
+   colors = cm.tab20(np.linspace(0, 1, len(categories)))
    bars = []
    for i, cat in enumerate(categories):
        cat_scores = [score[i] for score in scores]
-       new_bar = ax.bar(np.array(range(len_outlier_keys)), cat_scores, bottom=np.sum(scores[:, :i], axis=1),label=cat)
+       new_bar = ax.bar(np.array(range(len_outlier_keys)), cat_scores, bottom=np.sum(scores[:, :i], axis=1),color=colors[i],label=cat)
        bars.append(new_bar)
 
    def show_annotation(sel):
@@ -743,7 +745,10 @@ def plot_outliers(outliers_time_features,
    plt.subplots_adjust(bottom=0.45)
 
    def onclick(event):
-      index = int(event.xdata)
+      try:
+         index = int(event.xdata)
+      except TypeError as e:
+         return # do nothing
       key = list(outliers_time_features.keys())[index]
 
       # copy to clipboard the host@vlan
