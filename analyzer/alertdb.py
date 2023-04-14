@@ -366,10 +366,14 @@ def is_relevant_singleton(a):
     if (a["alert_id"] == 1):
         # print(alert_name)
     # if (alert_name == "blacklisted"):
-        if (u.is_private(SRV_ID[0]) and a["srv2cli_bytes"] > 0):
+        if (((CONTEXT_INFO and u.subnet_check(SRV_ID[0],ctx.BLK_WATCHED_SUBNETS)) or
+            u.is_private(SRV_ID[0])) and
+            a["srv2cli_bytes"] > 0):
             u.add_to_blk_peers(blk_peers,SRV_ID,"SRV",CLI_ID)
             return SRV_ID
-        if (u.is_private(CLI_ID[0]) and a["cli2srv_bytes"] > 0):
+        if (((CONTEXT_INFO and u.subnet_check(CLI_ID[0],ctx.BLK_WATCHED_SUBNETS)) or
+            u.is_private(CLI_ID[0])) and
+            a["cli2srv_bytes"] > 0):
             u.add_to_blk_peers(blk_peers,CLI_ID,"CLI",SRV_ID)
             return CLI_ID
 
