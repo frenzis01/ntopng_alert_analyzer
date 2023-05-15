@@ -24,6 +24,7 @@ import tkinter as tk
 from ipaddress import ip_address,IPv4Address
 
 import mplcursors
+import random
 
 my_historical = iface_id = time_lower = time_upper = None
 
@@ -302,13 +303,15 @@ def contains_two_nonzero_values(v:list):
    nonzero_values = set(filter(lambda x: x != 0, v))
    return len(nonzero_values) >= 2
 
+OUTLIER_LOWER_BOUND = 45
+
 def hostsR_outlier(hosts_ts:dict, outlier_detector: callable):
    outlier_hosts = {}
    for host,ratings in hosts_ts.items():
       # print("host and rating" + str((host,ratings) ))
       # hoti = host_outlier_time_indices
 
-      hoti = outlier_detector(values=ratings,lower_bound=45) if contains_two_nonzero_values(ratings) else []
+      hoti = outlier_detector(values=ratings,lower_bound=OUTLIER_LOWER_BOUND) if contains_two_nonzero_values(ratings) else []
       if hoti:
          outlier_hosts[host] = [hoti, list(map(lambda x: round(x,2),ratings))]   
    return outlier_hosts
@@ -321,7 +324,7 @@ def window_rating_outlier(hosts_ratings:list, outlier_detector: callable):
 
       d = {h:r for h,r in d.items() if r["total"] > 0.}
       ratings = list(map(lambda x: x["total"],d.values()))
-      hoti = outlier_detector(values=ratings,lower_bound=45) if contains_two_nonzero_values(ratings) else []
+      hoti = outlier_detector(values=ratings,lower_bound=OUTLIER_LOWER_BOUND) if contains_two_nonzero_values(ratings) else []
       hosts_index = [(list(d.keys())[i],i) for i in hoti]
       for host,i in hosts_index:
          outlier_hosts[host] = [[time_window_index], [round(ratings[i],2)]]
@@ -333,7 +336,6 @@ def window_rating_outlier(hosts_ratings:list, outlier_detector: callable):
 def detect_outliers_iqr(values,lower_bound:int, threshold=3.5):
     """
     This function detects outliers in a list of numbers using the interquartile range (IQR).
-
     values: list of numbers
     threshold: number of IQRs from the median to use as a threshold for outlier detection
 
@@ -588,7 +590,7 @@ def detect_outliers_holt_winters(values, lower_bound, threshold=1.5, smoothing_l
     
     
     # If data has less than 2 elements, return an empty list
-    if len(data) < 2:
+    if len(data) < 2 or len(list(filter(lambda x: x != 0,data))) < 4:
         return []
     
     data = np.array(data)
@@ -680,13 +682,6 @@ def plot_outliers(outliers_time_features,
                   hosts_sizes: dict,
                   all_time_dict: list,
                   title: str):
-
-   # filter vpn.unicomm.it
-   # for k in outliers_time_features.keys():
-   #    if k[1] == ("vpn.unicomm.it",47):
-   #       outliers_time_features.pop(outliers_time_features)
-   # outliers_time_features = {k:v for k,v in outliers_time_features.items() if (k[1] != ("vpn.unicomm.it",47))}
-   # outliers_time_features.pop((("vpn.unicomm.it",47),10),None)
 
    len_outlier_keys = len(outliers_time_features.items())
    if len_outlier_keys == 0:
@@ -852,3 +847,28 @@ def remove_unwanted_fields(a):
     a.pop("user_label_tstamp", None)
     a.pop("cli_host_pool_id", None)
     a.pop("srv_host_pool_id", None)
+
+def randomize_dict_keys(d):
+    randomized_keys = {}
+    for key in d:
+        x, y = key
+        while True:
+            new_key = (tuple(random.randint(0, 255) for _ in range(4)), random.randint(2, 70))
+            if new_key not in randomized_keys:
+                randomized_keys[new_key] = d[key]
+                break
+    return randomized_keys
+
+def randomize_dict(d):
+    result = {}
+    for key, value in d.items():
+        z, (x, y) = key
+        new_x = tuple(str(random.randint(0, 255)) for _ in range(4))
+        new_y = random.randint(2, 70)
+        new_key = (z, ('.'.join(new_x), new_y))
+        while new_key in result:
+            new_x = tuple(str(random.randint(0, 255)) for _ in range(4))
+            new_y = random.randint(2, 70)
+            new_key = (z, ('.'.join(new_x), new_y))
+        result[new_key] = value
+    return result

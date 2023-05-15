@@ -101,8 +101,6 @@ def to_be_ignored(a):
             or (ONLY_MATCHING_HOSTS and 
                 (not u.subnet_check(a["srv_ip"],ctx.SUBNETS_REGEX) and
                  not u.subnet_check(a["cli_ip"],ctx.SUBNETS_REGEX)))
-            # or a["vlan_id"] != 46 # TODO remove
-            # or a["vlan_id"] != 58 # TODO remove
         ):
                 return True
     except:
@@ -316,7 +314,8 @@ def is_relevant_singleton(a):
     # But there should be some other issues related, so the score should be higher
     if (alert_name == "remote_to_local_insecure_proto" 
         and a_json["ndpi_category_name"] == "RemoteAccess"
-        and a["score"] >= 180):
+        # and a["score"] >= 180
+        and a["srv2cli_bytes"] > 0):
         # u.addremove_to_singleton(sav[alert_name],key,1)
         u.addremove_to_singleton(remote_access,(SRV_ID,"srv"),1)
         u.addremove_to_singleton(remote_access,(CLI_ID,"cli"),1)
@@ -362,18 +361,31 @@ def is_relevant_singleton(a):
 
 
     # TODO ok?
+    def conn_refused():
+        try:
+            flow_risk_info = json.loads(a_json["alert_generation"]["flow_risk_info"])
+            if ("50" in flow_risk_info and
+                flow_risk_info["50"].find("Connection refused") != -1):
+                return False
+            return True
+        except KeyError:
+            return True
+
+
     global blk_peers
     if (a["alert_id"] == 1):
         # print(alert_name)
     # if (alert_name == "blacklisted"):
         if (((CONTEXT_INFO and u.subnet_check(SRV_ID[0],ctx.BLK_WATCHED_SUBNETS)) or
             u.is_private(SRV_ID[0])) and
-            a["srv2cli_bytes"] > 0):
+            a["srv2cli_bytes"] > 0 and
+            not conn_refused()):
             u.add_to_blk_peers(blk_peers,SRV_ID,"SRV",CLI_ID)
             return SRV_ID
         if (((CONTEXT_INFO and u.subnet_check(CLI_ID[0],ctx.BLK_WATCHED_SUBNETS)) or
             u.is_private(CLI_ID[0])) and
-            a["cli2srv_bytes"] > 0):
+            a["cli2srv_bytes"] > 0 and
+            not conn_refused()):
             u.add_to_blk_peers(blk_peers,CLI_ID,"CLI",SRV_ID)
             return CLI_ID
 
@@ -454,12 +466,15 @@ def get_host_ratings(sup_alerts: dict):
             # u.dict_incr(hostsR,(key[0],key[2]),DGA_DOMAINS_srv)
             u.dict_incr(hostsR,(key[1],key[2]),DGA_DOMAINS_cli,"DGA_DOMAINS")
     
-    # PROBING_VICTIMS_srv = 0
+    PROBING_VICTIMS_srv = 20
     PROBING_VICTIMS_cli = 15
-    for attackers in sup_alerts["PROBING_VICTIMS"].values():
-        # u.dict_incr(hostsR,(key[0],key[2]),PROBING_VICTIMS_srv)
-        for key in attackers:
-            u.dict_incr(hostsR,(key[1],key[2]),PROBING_VICTIMS_cli,"PROBING_VICTIMS")
+    for victim,attackers in sup_alerts["PROBING_VICTIMS"].items():
+        u.dict_incr(hostsR,victim,PROBING_VICTIMS_srv,"PROBING_VICTIMS")
+        # for key in attackers:
+            # print(key)
+            # TODO NO! key = '172.30.117.141'
+            # Thus (key[1],key[2]) = ('7','2')
+            # u.dict_incr(hostsR,(key[1],key[2]),PROBING_VICTIMS_cli,"PROBING_VICTIMS")
     
 
     BLK_PEER_rate = 40 
@@ -570,18 +585,17 @@ def get_host_ratings(sup_alerts: dict):
     max_n_alerts = max([0] + [alerts_per_host[k][-1] for k in size_outliers])
     for k in size_outliers:
         u.dict_incr(hostsR,k,get_size_rate(k),"N_alerts")
-        print(hostsR[k])
 
     SIZE_MAX_BONUS_RATE = 15
     def get_size_bonus_rate(host):
         if host in size_outliers:
             return 0
-        if (n := alerts_per_host[host][-1]) == 0:
+        if (n := alerts_per_host[host][-1] if host in alerts_per_host else 0) == 0:
             return 0
         return math.log(n,10) * (SIZE_MAX_BONUS_RATE / (den if (den := math.log(max_n_alerts, 10)) else 1))
     # max_n_alerts is the maximum number of alerts per host in the hosts which have computed a rating
     # in this time windows
-    max_n_alerts = max([0] + [alerts_per_host[k][-1] for k in hostsR.keys()])
+    max_n_alerts = max([0] + [alerts_per_host[k][-1] for k in hostsR.keys() if k in alerts_per_host])
     for k in hostsR.keys():
         u.dict_incr(hostsR,k,get_size_bonus_rate(k),"N_alerts")
 
@@ -605,7 +619,6 @@ def get_hosts_size_outliers(detect_outliers:callable):
         # return only if the outlier is the last index  
         if any(i+1 == n_time_windows for i in indexes):
             outliers.append(k)
-            print(str(k) + " : " + str(alerts_per_host[k]))
     
     return outliers
 
@@ -658,12 +671,7 @@ def unidirectional_handler(a):
     
     # Consider only when the traffic goes from client to server
     o = json.loads(a["json"])
-    try:
-        flow_risk = o["alert_generation"]["flow_risk_info"]
-        flow_risk = json.loads(flow_risk)
-        if (flow_risk["46"] != "No server to client traffic"):
-            return False
-    except KeyError as e:
+    if (a["srv2cli_bytes"] != 0):
         return False
     
     # Consider only when proto is TCP or is UDP the application
@@ -718,7 +726,6 @@ def get_unidir_probed():
         # If a server is a victim of probing, one or more client will be trying to 
         # unidirectionally communicate with it on many different ports
         if (len(unidir[srv]) > MIN_PROBING_RELEVANT_SIZE and
-            is_server(srv[1]) and
             (s := u.shannon_entropy(list(map(lambda x: x[1],unidir[srv])))) > PROBING_ENTROPY_THRESH):
             probed[srv] = set(map(lambda x: x[0],unidir[srv]))
     return probed
