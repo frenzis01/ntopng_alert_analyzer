@@ -143,12 +143,9 @@ def new_alert(a):
     u.n_alerts_incr(alerts_per_host,(SRV_ID,a["vlan_id"]))
     u.n_alerts_incr(alerts_per_host,(CLI_ID,a["vlan_id"]))
     # # add to singleton groups
-    # global singleton
-    # singleton = add_to_singleton(singleton,a)
     is_relevant_singleton(a)
 
     if STREAMING_MODE:
-        # TODO harvesting()
         update_bkts_stats()
 
 def update_bkts_stats() :
@@ -166,29 +163,6 @@ def add_to_bucket(alert, bkt, key):
     except KeyError:
         bkt[key] = [alert]
     return bkt
-
-def add_to_singleton(bkt,alert):
-    alert_name = get_alert_name(alert["json"])
-    key = is_relevant_singleton(alert)
-    # AVOID updating singleton alerts
-    # try:
-    #     x = bkt[key] # throws KeyError if not existing
-    #     bkt.pop(key, None)
-    # except KeyError:
-    #     if key:
-            # bkt[key] = (alert_name)
-    return bkt
-
-def harvesting(bound: dt.datetime):
-    def to_harvest(alert):
-        return alert["tstamp"] < bound
-    
-    # TODO perform also on other groupings
-    global bkt_srv,bkt_cli,bkt_srvcli
-    bkt_srv = {k:harvested_v for (k,v) in bkt_srv.items() if len(harvested_v := list(filter(to_harvest,v)))}
-    bkt_cli = {k:harvested_v for (k,v) in bkt_cli.items() if len(harvested_v := list(filter(to_harvest,v)))}
-    bkt_srvcli = {k:harvested_v for (k,v) in bkt_srvcli.items() if len(harvested_v := list(filter(to_harvest,v)))}
-
 
 # GETTERS
 def get_bkt(BKT: int) -> dict:
@@ -216,7 +190,6 @@ def is_relevant_singleton(a):
             k = SRV_ID
         if (a["is_cli_attacker"] == 1):
             k = CLI_ID
-        # TODO can this happen?
         # Note: case not included in k init
         if (a["is_srv_attacker"] == 1 and a["is_cli_attacker"] == 1):
             k = SRVCLI_ID
@@ -388,18 +361,6 @@ def is_relevant_singleton(a):
             not conn_refused()):
             u.add_to_blk_peers(blk_peers,CLI_ID,"CLI",SRV_ID)
             return CLI_ID
-
-
-    # Avoid considering other alert types
-
-    # # if (alert_name in RELEVANT_SINGLETON_ALERTS):
-    # if (alert_name not in IGNORE_SINGLETON_ALERTS):
-    #     if (alert_name not in sav):
-    #         sav[alert_name] = {}
-    #     # check if the key was already present
-    #     # if yes, it is not a singleton
-    #     u.addremove_to_singleton(sav[alert_name],key,1)
-
     
     return None
 
@@ -420,7 +381,6 @@ def get_singleton_alertview() -> dict:
 def get_bkt_stats(BKT: int) -> dict:
     if (BKT not in range(3)):
         raise Exception("Invalid bucket id: 0,1,2 (srv,cli,srvcli) available only")
-    # global bkt_srv_stats,bkt_cli_stats,bkt_srvcli_stats
     if (BKT == GRP_SRV):
         return bkt_srv_stats
     if (BKT == GRP_CLI):
@@ -463,18 +423,12 @@ def get_host_ratings(sup_alerts: dict):
     DGA_DOMAINS_cli = 20
     for keys in sup_alerts["DGA_DOMAINS"].values():
         for key in keys:
-            # u.dict_incr(hostsR,(key[0],key[2]),DGA_DOMAINS_srv)
             u.dict_incr(hostsR,(key[1],key[2]),DGA_DOMAINS_cli,"DGA_DOMAINS")
     
     PROBING_VICTIMS_srv = 20
     PROBING_VICTIMS_cli = 15
     for victim,attackers in sup_alerts["PROBING_VICTIMS"].items():
         u.dict_incr(hostsR,victim,PROBING_VICTIMS_srv,"PROBING_VICTIMS")
-        # for key in attackers:
-            # print(key)
-            # TODO NO! key = '172.30.117.141'
-            # Thus (key[1],key[2]) = ('7','2')
-            # u.dict_incr(hostsR,(key[1],key[2]),PROBING_VICTIMS_cli,"PROBING_VICTIMS")
     
 
     BLK_PEER_rate = 40 
@@ -647,9 +601,7 @@ def get_sup_level_alerts(time:dict) -> dict:
     for grp_crit in [GRP_SRV, GRP_CLI, GRP_SRVCLI]:
         sup_level_alerts["FLAT_GROUPINGS"][map_id_to_name(grp_crit)] = {
             "higher_alert_types" : get_higher_alert_types(grp_crit),
-            # "tls_critical" : get_tls_critical(grp_crit),
             "cs_paradigm_odd" : get_cs_paradigm_odd(grp_crit),
-            # "blk_peer" : get_blk_peer(grp_crit),
             "simultaneous" : get_simultaneous(grp_crit),
             "periodic" : get_periodic(grp_crit),
             "similar_periodicity" : get_similar_periodicity(grp_crit),
@@ -679,10 +631,6 @@ def unidirectional_handler(a):
     if not (a["proto"] == 6 or (a["proto"] == 17
                                 and any("".join(o["proto"].keys()).find(app) != -1 for app in BIDIR_APP))):
         return False
-
-    # Consider only when the server possible victim is a private host
-    # if not ip_address(a["srv_ip"]).is_private:
-    #     return False
 
     # We are sure the alert indicates
     # Unidir traffic from client to server
@@ -836,14 +784,11 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
         d["srv_ip_blk"] = (len(srv_ip_blk)/len(srv_ip_set) if len(srv_ip_set) else 0)
         d["cli_ip_blk"] = s[0]["cli_blacklisted"]
 
-    # TODO
     d["srv_ip_blk"] = 1 if any(x["srv_blacklisted"] for x in s) else 0
     d["cli_ip_blk"] = 1 if any(x["cli_blacklisted"] for x in s) else 0
 
     # PERIODICITY - AKA Time interval Coefficient of Variation (CV)
     # assert that 's' is sorted on tstamp
-    # TODO histogram rita-like
-    # TODO optimize update on new alert
     def avg_delta(l):
         delta_sum = dt.timedelta(seconds=0)
         for i in range(1,len(l)):
@@ -863,7 +808,6 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     d["score_avg"] = np.mean(list(map(lambda x: x["score"],s)))
     
     # MISSING USER-AGENT percentage (0<p<1 format)
-    # TODO optimize update on new alert
     def is_UA_missing(x):
         y = json.loads(x)
         try:
@@ -876,7 +820,6 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
     d["noUA_perc"] = sum(map(is_UA_missing,map(lambda x: x["json"],s))) / s_size
     
     # BAT Binary Application Transfer -> Check if same file
-    # TODO optimize update on new alert
     d["bat_same_file"] = ""
 
     if (s[0]["alert_id"] == 29):
@@ -895,35 +838,6 @@ def compute_bkt_stats(s: list, GRP_CRIT: int):
 
     d["size"] = s_size
     
-    # X-SCORE CALCULATION
-    # TODO change (ip/port) weights depending on alert_id
-    # TODO cli2srv and srv2cli bytes
-    # TODO hostpool?
-    # TODO other json fields i.e. file name
-    d["X-Score"] = (
-        math.log(s_size) +  # Higher size => higher score
-        # multi-target groups, i.e. high IP entropy => Higher score
-        ((d["srv_ip_S"]) * 10) +
-        ((d["cli_ip_S"])*10) +
-        # Inverse of common srv/cli behavior, i.e. HIGH srv_port_S || LOW cli_port_S
-        #   => Higher score
-        (d["srv_port_S"])*10 +
-        (1 - d["cli_port_S"])*10 +
-        # Extra points if communicating with blacklisted IPs
-        # if alert isn't of type "blacklisted"
-        d["srv_ip_blk"] * (20 if s[0]["alert_id"] != 1 else 5) +
-        # if alert isn't of type "blacklisted"
-        d["cli_ip_blk"] * (20 if s[0]["alert_id"] != 1 else 5) +
-        # Periodicity score = e^(-CV)
-        # lower tdiff_CV => High time periodicity
-        pow(math.e, (-1.0)*d["tdiff_CV"]) +
-        # ntopng avg score
-        math.log2(d["score_avg"]) * 2 +  # 70 -> ~12.4  | 300 -> ~16.5
-        # percentage of missing user agent
-        d["noUA_perc"]*20 +  # relevant only when BFT or HTTPsusUA
-        # Is the transferred file always the same?
-        (1 if (d["bat_same_file"] != "") else 0) * 15
-    )
     return d
 
 # Superior level alert generation Getters
@@ -1018,9 +932,6 @@ def get_cs_paradigm_odd(GRP_CRIT:int):
     
     # k = ("ip","vlan","alert_id") we must exclude "alert_id" 
     tmp= {k: oddity for (k,v) in bkt_s.items() if (oddity := is_odd(v,k[-1:]))}
-    # hosts = {}
-    # for k,v in tmp.items():
-    #     hosts[(k[0],k[1])] = v
     return get_hosts_noalertid(tmp)
 
 # @returns groups which are strongly periodic (i.e. tdiff_CV < 0.85)
@@ -1040,7 +951,6 @@ def get_periodic(GRP_CRIT:int):
     # Note: exclude not periodic relevant alerts
     excludes = TLS_ALERTS #+ ["remote_to_local_insecure_proto","ndpi_http_suspicious_user_agent"]
 
-    # TODO return also CV?  i.e. (v["tdiff_avg"],v["tdiff_CV"],v["size"]))
     return {k: v["tdiff_avg"] + " " + v["alert_name"] for (k, v) in bkt_s.items()
             if v["tdiff_CV"] < PERIODIC_CV_THRESHOLD
             # and v["tdiff_CV"] > 0.0
@@ -1049,7 +959,6 @@ def get_periodic(GRP_CRIT:int):
             and v["alert_name"] not in excludes}
 
 def get_similar_periodicity(GRP_CRIT:int):
-    # TODO consider also the alert type
     bkt_s = get_bkt_stats(GRP_CRIT)
 
     # filter only periodic groups, i.e. tdiff_CV < 1.25
@@ -1171,7 +1080,6 @@ def get_blk_peer(GRP_CRIT:int):
                     )
                   ))}
 
-    # print(json.dumps({str(k):v for k,v in peers.items()},indent=2))
     
     # k = ("ip","vlan","alert_id") we must exclude "alert_id" 
     
@@ -1203,5 +1111,3 @@ def is_server(vlan_id:int):
     return not CONTEXT_INFO or vlan_id in ctx.VLAN_SERVER
 def is_client(vlan_id:int):
     return not CONTEXT_INFO or vlan_id in ctx.VLAN_CLIENT
-
-# dict_init_alertnames()
