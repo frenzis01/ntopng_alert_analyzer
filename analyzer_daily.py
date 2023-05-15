@@ -176,7 +176,7 @@ if not FILE_INPUT:
         hostsR = get_host_ratings(sup_level_alerts)
         
         if ONLY_MATCHING_HOSTS:
-            hostsR = {k:v for k,v in hostsR.items() if subnet_check(k[0])}
+            hostsR = {k:v for k,v in hostsR.items() if subnet_check(k[0],ctx.SUBNETS_REGEX)}
 
         all_sup_level_alerts += [sla]
         
@@ -224,7 +224,11 @@ if FILE_INPUT:
         set_blk_peers(sup_level_alerts["BLK_PEER"])
         set_remote_access(sup_level_alerts["REMOTE_ACCESS"])
 
-        hostsR = {k:v for k,v in get_host_ratings(sup_level_alerts).items() if (k != ("vpn.unicomm.it",47))}
+        hostsR = {k:v for k,v in get_host_ratings(sup_level_alerts).items()}
+
+        if ONLY_MATCHING_HOSTS:
+            hostsR = {k:v for k,v in get_host_ratings(sup_level_alerts).items() if subnet_check(k[0],ctx.SUBNETS_REGEX)}
+
         hosts_ratings += [hostsR]
         new_hostsR_handler(hosts_ts,hostsR)
 
@@ -236,7 +240,7 @@ hosts_sizes = alerts_per_host
 
 
 if ONLY_MATCHING_HOSTS:
-    hosts_ts = {k:v for k,v in hosts_ts.items() if subnet_check(k[0])}
+    hosts_ts = {k:v for k,v in hosts_ts.items() if subnet_check(k[0],ctx.SUBNETS_REGEX)}
 
 with open("mock_hosts_ts.json", "w") as f:
     f.write(json.dumps(str_key(hosts_ts),indent=2))
