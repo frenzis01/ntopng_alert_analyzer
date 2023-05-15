@@ -99,7 +99,7 @@ try:
 
     my_historical = Historical(my_ntopng,iface_id)
     t_end = datetime.datetime.now() - datetime.timedelta(minutes=0)
-    t_start = t_end - datetime.timedelta(minutes=myenv.WINDOW_SIZE_MINUTES)
+    t_start = t_end - datetime.timedelta(minutes=24*myenv.WINDOW_SIZE_MINUTES)
     time_dict = {
         "start" : t_start.strftime("%d/%m/%Y %H:%M:%S"),
         "end" : t_end.strftime("%d/%m/%Y %H:%M:%S")
@@ -107,23 +107,26 @@ try:
     from analyzer.utils.u import set_historical
     set_historical(my_historical,iface_id,t_start,t_end)
     raw_alerts = my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
-        '%s'), "*", "severity >= 5 AND NOT alert_id = 91", 200000, "", "tstamp")
+        '%s'), "*", "severity >= 5 AND alert_id = 1 AND NOT srv2cli_bytes = 0", 200000, "", "tstamp")
 
-    raw_alerts += my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
-        '%s'), "*", "alert_id = 26", 2000000, "", "")
+    # raw_alerts += my_historical.get_flow_alerts(t_start.strftime('%s'), t_end.strftime(
+    #     '%s'), "*", "alert_id = 26", 2000000, "", "")
     
 except ValueError as e:
     print(e)
     os._exit(-1)
 
 
-from analyzer.alertdb import *
-for a in raw_alerts:
-    new_alert(a)
+with open("mock_tmp_blk.json","w") as f:
+    f.write(json.dumps(raw_alerts,indent=2))
 
-from analyzer.utils.u import str_key
+# from analyzer.alertdb import *
+# for a in raw_alerts:
+#     new_alert(a)
 
-sup_level_alerts = get_sup_level_alerts()
-hostsR = get_host_ratings(sup_level_alerts)
-print(json.dumps({"time" : time_dict} | str_key(sup_level_alerts),indent=2))
-print(json.dumps(str_key(get_hosts_outliers(hostsR)),indent=2))
+# from analyzer.utils.u import str_key
+
+# sup_level_alerts = get_sup_level_alerts()
+# hostsR = get_host_ratings(sup_level_alerts)
+# print(json.dumps({"time" : time_dict} | str_key(sup_level_alerts),indent=2))
+# print(json.dumps(str_key(get_hosts_outliers(hostsR)),indent=2))
